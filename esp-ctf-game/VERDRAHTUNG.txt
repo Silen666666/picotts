@@ -1,0 +1,115 @@
+╔══════════════════════════════════════════════════════════════════╗
+║              ESP CTF GAME – VERDRAHTUNGSSCHEMA                   ║
+╚══════════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  A) NODE  (je 1× pro Spielstation)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  STROMVERSORGUNG
+  ───────────────
+  Powerbank / USB-Ladegerät 5V
+        │
+        └── Micro-USB ──► ESP (NodeMCU oder D1 Mini)
+
+
+  WS2812B-8 LED-Leiste
+  ─────────────────────
+  (Linke Seite des Moduls)
+
+   WS2812B-8             NodeMCU/D1 Mini
+  ┌──────────┐           ┌─────────────┐
+  │  GND  ───┼───────────┤ GND         │
+  │  IN   ───┼──[300Ω]───┤ D4 (GPIO2)  │
+  │  VCC  ───┼───────────┤ VIN (5V)    │
+  │  GND  ───┼───────────┤ GND         │  (Masseschleife)
+  └──────────┘           └─────────────┘
+
+  RECHTE SEITE (OUT, GND, VCC, GND): frei lassen
+  oder mit nächstem WS2812B-Modul verketten
+
+
+  TASTER (Momentary Push Button)
+  ───────────────────────────────
+   Taster          NodeMCU/D1 Mini
+  ┌────────┐       ┌─────────────┐
+  │ Pin 1 ─┼───────┤ D3 (GPIO0)  │
+  │ Pin 2 ─┼───────┤ GND         │
+  └────────┘       └─────────────┘
+
+  → KEIN externer Widerstand nötig (interner Pull-Up aktiv)
+
+
+  WICHTIGE HINWEISE
+  ─────────────────
+  • 300 Ω Widerstand auf der Datenleitung (IN-Pin) schützt WS2812B
+  • Kondensator 100–470 µF zwischen VCC und GND der LED (optional,
+    verhindert Spannungseinbrüche bei Farbwechseln)
+  • GPIO0 (D3) beim Booten nicht gedrückt halten → ESP bleibt im
+    Flash-Modus. Einfach loslassen, dann normal funktionsfähig.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  B) MASTER  (1× zentral)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Nur Stromversorgung via USB – kein Button, keine LED nötig.
+  Konfiguration über Browser (Handy verbindet sich mit WLAN des Masters).
+
+  Optional: Eine eigene LED am Master für Status (D4/GPIO2).
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  C) GESAMTÜBERSICHT (Beispiel 3 Nodes)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ┌──────────────────────────────────────────┐
+  │                MASTER-ESP                │
+  │   WiFi-AP "ESP-CTF-Game"                 │
+  │   Webserver → http://192.168.4.1         │
+  └────────────┬─────────────────────────────┘
+               │ WiFi (UDP)
+       ┌───────┼──────────────────┐
+       │       │                  │
+  ┌────┴──┐ ┌──┴────┐ ┌──────────┴┐
+  │Node 1 │ │Node 2 │ │  Node 3   │
+  │ LED   │ │ LED   │ │  LED      │
+  │ Btn   │ │ Btn   │ │  Btn      │
+  └───────┘ └───────┘ └───────────┘
+
+  Handy ──WLAN──► "ESP-CTF-Game" ──► Browser: http://192.168.4.1
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  D) NODEMCU PINBELEGUNG (Übersicht)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+          ┌──[USB]──┐
+  A0    ──┤         ├── D0  (GPIO16)
+  RSV   ──┤         ├── D1  (GPIO5)
+  RSV   ──┤         ├── D2  (GPIO4)
+  SD3   ──┤         ├── D3  (GPIO0) ◄── TASTER
+  SD2   ──┤         ├── D4  (GPIO2) ◄── WS2812B IN
+  SD1   ──┤         ├── 3V3
+  CMD   ──┤         ├── GND
+  SD0   ──┤         ├── VIN (5V) ◄── WS2812B VCC
+  CLK   ──┤         ├── RST
+  GND   ──┤         ├── EN
+  3V3   ──┤         ├── TX
+  VIN   ──┤         ├── RX
+          └─────────┘
+
+
+  D) WEMOS D1 MINI PINBELEGUNG (kompaktere Alternative)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+          ┌──[USB]──┐
+  RST   ──┤         ├── TX
+  A0    ──┤         ├── RX
+  D0    ──┤         ├── D1  (GPIO5)
+  D5    ──┤         ├── D2  (GPIO4)
+  D6    ──┤         ├── D3  (GPIO0) ◄── TASTER
+  D7    ──┤         ├── D4  (GPIO2) ◄── WS2812B IN
+  D8    ──┤         ├── GND ◄── WS2812B GND / Taster
+  3V3   ──┤         ├── 5V  ◄── WS2812B VCC
+          └─────────┘
