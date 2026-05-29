@@ -30,7 +30,7 @@
   #define BUTTON_PIN  0    // D3 (GPIO0) – avoid using GPIO0 at boot if possible
 #endif
 
-#define NEO_COUNT          1
+#define NEO_COUNT          8   // WS2812B-8 bar
 #define BUTTON_DEBOUNCE_MS 50
 
 // ----------------------------------------------------------------

@@ -48,7 +48,7 @@ static const uint32_t COLORS[] = {
 
 void applyRGB(uint8_t r, uint8_t g, uint8_t b) {
 #ifdef LED_NEOPIXEL
-  strip.setPixelColor(0, r, g, b);
+  for (int i = 0; i < NEO_COUNT; i++) strip.setPixelColor(i, r, g, b);
   strip.show();
 #elif defined(LED_RGB_CATHODE)
   analogWrite(LED_R_PIN, r);
