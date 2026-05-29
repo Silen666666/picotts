@@ -1,0 +1,310 @@
+/*
+ * ESP CTF Game – Node Firmware
+ * Compatible with ESP8266 and ESP32.
+ *
+ * Each node:
+ *   - Connects to the master's WiFi AP
+ *   - Registers itself and receives a node ID
+ *   - Monitors a button (with debounce)
+ *   - Drives an RGB LED (NeoPixel or 3-pin RGB)
+ *   - Executes animations (solid, blink, pulse, flash)
+ */
+
+#ifdef ESP32
+  #include <WiFi.h>
+#else
+  #include <ESP8266WiFi.h>
+#endif
+#include <WiFiUdp.h>
+
+#ifdef LED_NEOPIXEL
+  #include <Adafruit_NeoPixel.h>
+#endif
+
+#include "config.h"
+#include "protocol.h"
+
+// ─────────────────────────────────────────────────────────────
+// LED
+// ─────────────────────────────────────────────────────────────
+
+// 24-bit RGB color table indexed by COL_*
+static const uint32_t COLORS[] = {
+  0x000000,  // OFF
+  0xFF0000,  // RED
+  0x0000FF,  // BLUE
+  0x00FF00,  // GREEN
+  0xFFFF00,  // YELLOW
+  0xFFFFFF,  // WHITE
+  0x800080,  // PURPLE
+  0x00FFFF,  // CYAN
+  0xFF8000,  // ORANGE
+};
+#define NUM_COLORS (sizeof(COLORS) / sizeof(COLORS[0]))
+
+#ifdef LED_NEOPIXEL
+  Adafruit_NeoPixel strip(NEO_COUNT, NEO_PIN, NEO_GRB + NEO_KHZ800);
+#endif
+
+void applyRGB(uint8_t r, uint8_t g, uint8_t b) {
+#ifdef LED_NEOPIXEL
+  strip.setPixelColor(0, r, g, b);
+  strip.show();
+#elif defined(LED_RGB_CATHODE)
+  analogWrite(LED_R_PIN, r);
+  analogWrite(LED_G_PIN, g);
+  analogWrite(LED_B_PIN, b);
+#elif defined(LED_RGB_ANODE)
+  analogWrite(LED_R_PIN, 255 - r);
+  analogWrite(LED_G_PIN, 255 - g);
+  analogWrite(LED_B_PIN, 255 - b);
+#endif
+}
+
+void applyColor(uint32_t rgb) {
+  applyRGB((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Animation state
+// ─────────────────────────────────────────────────────────────
+
+struct LedState {
+  uint8_t  colorIdx;    // COL_* index
+  uint8_t  anim;        // ANIM_*
+  uint32_t lastChange;
+  uint8_t  phase;       // toggle/step counter
+  bool     flashDone;
+};
+LedState led = {COL_OFF, ANIM_SOLID, 0, 0, false};
+
+void setLed(uint8_t colorIdx, uint8_t anim) {
+  led.colorIdx  = (colorIdx < NUM_COLORS) ? colorIdx : 0;
+  led.anim      = anim;
+  led.lastChange = millis();
+  led.phase     = 0;
+  led.flashDone = false;
+}
+
+void updateLed() {
+  uint32_t color = COLORS[led.colorIdx];
+  uint32_t now   = millis();
+
+  switch (led.anim) {
+    case ANIM_SOLID:
+      applyColor(color);
+      break;
+
+    case ANIM_BLINK_SLOW:
+      if (now - led.lastChange >= 500) {
+        led.phase ^= 1;
+        led.lastChange = now;
+      }
+      applyColor(led.phase ? color : 0);
+      break;
+
+    case ANIM_BLINK_FAST:
+      if (now - led.lastChange >= 125) {
+        led.phase ^= 1;
+        led.lastChange = now;
+      }
+      applyColor(led.phase ? color : 0);
+      break;
+
+    case ANIM_PULSE: {
+      // Sine-approximated breathing, period ~2s
+      uint32_t t   = (now % 2000);
+      uint8_t  val = (t < 1000) ? (t / 4) : (255 - ((t - 1000) / 4));
+      uint8_t  r   = ((color >> 16) & 0xFF) * val / 255;
+      uint8_t  g   = ((color >>  8) & 0xFF) * val / 255;
+      uint8_t  b   = ( color        & 0xFF) * val / 255;
+      applyRGB(r, g, b);
+      break;
+    }
+
+    case ANIM_FLASH:
+      if (!led.flashDone) {
+        if (led.phase == 0) {
+          applyColor(0xFFFFFF);         // brief white flash
+          if (now - led.lastChange >= 80) { led.phase = 1; led.lastChange = now; }
+        } else if (led.phase == 1) {
+          applyColor(0);
+          if (now - led.lastChange >= 60) { led.phase = 2; led.lastChange = now; }
+        } else {
+          led.flashDone = true;         // fall through to solid
+        }
+      } else {
+        applyColor(color);
+      }
+      break;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Button
+// ─────────────────────────────────────────────────────────────
+
+bool     lastRaw      = HIGH;
+bool     lastDebounced = HIGH;
+uint32_t lastChangeTs = 0;
+
+// Returns true on the falling edge (press)
+bool buttonPressed() {
+  bool raw = digitalRead(BUTTON_PIN);
+  uint32_t now = millis();
+
+  if (raw != lastRaw) {
+    lastRaw = raw;
+    lastChangeTs = now;
+  }
+  if (now - lastChangeTs >= BUTTON_DEBOUNCE_MS && raw != lastDebounced) {
+    lastDebounced = raw;
+    if (raw == LOW) return true;   // falling edge = press
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Network
+// ─────────────────────────────────────────────────────────────
+
+WiFiUDP  udp;
+IPAddress masterIP;
+uint8_t  myId        = 0;
+uint32_t lastRegister = 0;
+uint32_t lastPing    = 0;
+
+void sendPkt(uint8_t type, uint8_t nid,
+             uint8_t d0=0,uint8_t d1=0,uint8_t d2=0,
+             uint8_t d3=0,uint8_t d4=0,uint8_t d5=0) {
+  Packet p;
+  p.type = type; p.nodeId = nid;
+  p.data[0]=d0; p.data[1]=d1; p.data[2]=d2;
+  p.data[3]=d3; p.data[4]=d4; p.data[5]=d5;
+  udp.beginPacket(masterIP, UDP_PORT);
+  udp.write((uint8_t*)&p, sizeof(p));
+  udp.endPacket();
+}
+
+void handleUDP() {
+  int size = udp.parsePacket();
+  if (size < (int)sizeof(Packet)) return;
+
+  Packet p;
+  udp.read((uint8_t*)&p, sizeof(p));
+
+  switch (p.type) {
+    case PKT_ACK:
+      myId = p.data[0];
+      Serial.printf("[NODE] Registered as node %u\n", myId);
+      setLed(COL_GREEN, ANIM_FLASH);
+      break;
+
+    case PKT_SET_LED:
+      if (p.nodeId == myId || p.nodeId == 0xFF)
+        setLed(p.data[0], p.data[1]);
+      break;
+
+    case PKT_GAME_START:
+      Serial.printf("[NODE] Game started, mode=%u\n", p.data[0]);
+      break;
+
+    case PKT_GAME_OVER:
+      Serial.println("[NODE] Game over");
+      break;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// WiFi connection
+// ─────────────────────────────────────────────────────────────
+
+void connectWiFi() {
+  Serial.printf("\nConnecting to '%s'", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, *WIFI_PASS ? WIFI_PASS : nullptr);
+
+  uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    if (millis() - start > WIFI_TIMEOUT_MS) {
+      Serial.println("\n[WARN] WiFi timeout, retrying...");
+      WiFi.disconnect();
+      delay(1000);
+      WiFi.begin(WIFI_SSID, *WIFI_PASS ? WIFI_PASS : nullptr);
+      start = millis();
+    }
+    // Blink while connecting
+    applyColor((millis() / 250) % 2 ? 0x000088 : 0);
+    delay(100);
+    Serial.print('.');
+  }
+
+  Serial.printf("\nConnected. IP: %s\n", WiFi.localIP().toString().c_str());
+  masterIP.fromString(MASTER_IP);
+  udp.begin(UDP_PORT);
+}
+
+// ─────────────────────────────────────────────────────────────
+// setup / loop
+// ─────────────────────────────────────────────────────────────
+
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+  Serial.println("\n=== ESP CTF Game – Node ===");
+
+  // LED init
+#ifdef LED_NEOPIXEL
+  strip.begin();
+  strip.setBrightness(80);
+  strip.show();
+#else
+  pinMode(LED_R_PIN, OUTPUT);
+  pinMode(LED_G_PIN, OUTPUT);
+  pinMode(LED_B_PIN, OUTPUT);
+#endif
+
+  // Button
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
+  // Startup blink
+  applyColor(0xFF8000); delay(200); applyColor(0); delay(200);
+  applyColor(0xFF8000); delay(200); applyColor(0);
+
+  connectWiFi();
+
+  // Register with master
+  setLed(COL_BLUE, ANIM_BLINK_SLOW);
+}
+
+void loop() {
+  // Reconnect if WiFi dropped
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[WARN] WiFi lost, reconnecting...");
+    connectWiFi();
+  }
+
+  handleUDP();
+
+  // Registration (until acknowledged)
+  if (myId == 0 && millis() - lastRegister >= REGISTER_RETRY_MS) {
+    lastRegister = millis();
+    sendPkt(PKT_REGISTER, 0);
+    Serial.println("[NODE] Registering...");
+  }
+
+  // Keepalive ping
+  if (myId != 0 && millis() - lastPing >= PING_INTERVAL_MS) {
+    lastPing = millis();
+    sendPkt(PKT_PING, myId);
+  }
+
+  // Button
+  if (myId != 0 && buttonPressed()) {
+    Serial.printf("[NODE] Button pressed (id=%u)\n", myId);
+    sendPkt(PKT_BUTTON, myId);
+  }
+
+  updateLed();
+  yield();  // ESP8266 watchdog
+}
