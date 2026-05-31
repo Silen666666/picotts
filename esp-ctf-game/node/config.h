@@ -20,14 +20,14 @@
   // Button (active LOW, internal pull-up)
   #define BUTTON_PIN  0
 #else  // ESP8266 NodeMCU / Wemos D1 mini
-  // NeoPixel
-  #define NEO_PIN     2    // D4 (GPIO2)
+  // NeoPixel  – sicherer Pin (kein Boot-Strapping)
+  #define NEO_PIN     4    // D2 (GPIO4)
   // Simple RGB LED
   #define LED_R_PIN  14    // D5
   #define LED_G_PIN  12    // D6
   #define LED_B_PIN  13    // D7
-  // Button (active LOW, internal pull-up)
-  #define BUTTON_PIN  0    // D3 (GPIO0) – avoid using GPIO0 at boot if possible
+  // Button (active LOW, internal pull-up) – sicherer Pin, stoert den Boot nicht
+  #define BUTTON_PIN  5    // D1 (GPIO5)
 #endif
 
 #define NEO_COUNT          8   // WS2812B-8 bar
