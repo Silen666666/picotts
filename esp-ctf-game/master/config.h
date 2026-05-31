@@ -22,3 +22,15 @@
 #define REACT_DELAY_MIN_MS    600       // min pause between rounds
 #define REACT_DELAY_MAX_MS    3000      // max pause (random)
 #define MAX_HIGHSCORES        10
+
+// King of the Hill
+#define KING_THRONE_MOVE_S  30
+
+// Minesweeper
+#define MINE_COUNT_DEFAULT  2
+
+// Knockout
+#define KNOCK_LIVES_DEFAULT 3
+
+// Color Hunt
+#define COLORHUNT_ROUNDS    8

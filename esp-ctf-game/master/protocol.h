@@ -11,6 +11,10 @@
 #define PKT_GAME_START 0x05  // Master→All: mode=data[0]
 #define PKT_GAME_OVER  0x06  // Master→All: winner color=data[0]
 #define PKT_PING       0x07  // Node→Master: keepalive
+#define PKT_SET_BAR    0x08  // Master→Node: set N LEDs to color, rest to bgColor
+                              // data[0]=color, data[1]=count(0-8), data[2]=bgColor
+#define PKT_SET_SPLIT  0x09  // Master→Node: split bar
+                              // data[0]=colorA, data[1]=countA(0-8), data[2]=colorB
 
 // Colors (index into COLORS[] on the node)
 #define COL_OFF     0
@@ -29,13 +33,22 @@
 #define ANIM_BLINK_FAST 2   // 125 ms period
 #define ANIM_PULSE      3   // breathing
 #define ANIM_FLASH      4   // one quick flash, then solid
+#define ANIM_BAR        5   // N LEDs solid color, rest bgColor (used with PKT_SET_BAR)
+#define ANIM_SPLIT      6   // left N=colorA, rest=colorB (used with PKT_SET_SPLIT)
 
 // Game modes
-#define GAME_IDLE     0
-#define GAME_CTF      1
-#define GAME_MEMORY   2
-#define GAME_BOMB     3
-#define GAME_REACTION 4
+#define GAME_IDLE        0
+#define GAME_CTF         1
+#define GAME_MEMORY      2
+#define GAME_BOMB        3
+#define GAME_REACTION    4
+#define GAME_SIMON       5
+#define GAME_HOTPOTATO   6
+#define GAME_KINGHILL    7
+#define GAME_TUGWAR      8
+#define GAME_MINESWEEPER 9
+#define GAME_KNOCKOUT    10
+#define GAME_COLORHUNT   11
 
 struct Packet {
   uint8_t type;
