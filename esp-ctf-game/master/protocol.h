@@ -31,10 +31,11 @@
 #define ANIM_FLASH      4   // one quick flash, then solid
 
 // Game modes
-#define GAME_IDLE   0
-#define GAME_CTF    1
-#define GAME_MEMORY 2
-#define GAME_BOMB   3
+#define GAME_IDLE     0
+#define GAME_CTF      1
+#define GAME_MEMORY   2
+#define GAME_BOMB     3
+#define GAME_REACTION 4
 
 struct Packet {
   uint8_t type;

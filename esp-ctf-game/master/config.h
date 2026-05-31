@@ -15,3 +15,10 @@
 #define BOMB_SEQ_LEN     5              // steps to disarm
 #define BOMB_DURATION_S  120
 #define BOMB_STEP_MS     1200           // ms per step in sequence reveal
+
+// Reaction Game
+#define REACT_ROUNDS_DEFAULT  10
+#define REACT_TIMEOUT_MS      5000      // ms until round times out
+#define REACT_DELAY_MIN_MS    600       // min pause between rounds
+#define REACT_DELAY_MAX_MS    3000      // max pause (random)
+#define MAX_HIGHSCORES        10
