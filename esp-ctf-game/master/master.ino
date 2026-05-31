@@ -1116,6 +1116,15 @@ select,input[type=number],input[type=text]{width:100%;padding:8px 11px;backgroun
 .nodes-grid{display:flex;flex-wrap:wrap;gap:5px;margin-top:8px}
 .nd{width:34px;height:34px;border-radius:7px;background:#21262d;border:1px solid #30363d;display:flex;align-items:center;justify-content:center;font-size:.72rem;font-weight:700;color:#8b949e}
 .nd.on{background:#0f5132;border-color:#3fb950;color:#3fb950}
+.nd.off{background:#3d1518;border-color:#f85149;color:#f85149}
+.pl{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:.88rem}
+.pl .pdot{width:10px;height:10px;border-radius:50%;flex-shrink:0;box-shadow:0 0 5px currentColor}
+.pl .pdot.on{background:#3fb950;color:#3fb950}
+.pl .pdot.off{background:#f85149;color:#f85149}
+.pl .pname{flex:1;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl .pstat{font-size:.76rem;color:#8b949e}
+.pl.dead .pname{color:#6e7681}
+.info-line{text-align:center;font-size:.95rem;font-weight:600;color:#a8dadc;margin:8px 0 2px;padding:8px;background:#0d1117;border-radius:8px}
 table{width:100%;border-collapse:collapse;font-size:.88rem}
 th{color:#8b949e;font-weight:600;padding:4px 6px;text-align:left;border-bottom:1px solid #30363d}
 td{padding:4px 6px;border-bottom:1px solid #21262d}
@@ -1131,9 +1140,11 @@ summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6p
 <div class="card">
   <h2>Status</h2>
   <div class="row"><span>Spielmodus</span><span id="modeName" class="badge idle">Idle</span></div>
-  <div class="row"><span>Nodes</span><strong id="nodeCount">0</strong></div>
+  <div class="row"><span>Nodes verbunden</span><strong id="nodeCount">0 / 0</strong></div>
   <div class="nodes-grid" id="nodesGrid"></div>
+  <div id="nodeNames"></div>
   <div class="timer hidden" id="timer"></div>
+  <div class="info-line hidden" id="infoLine"></div>
 </div>
 
 <div class="card hidden" id="namesCard">
@@ -1220,6 +1231,11 @@ summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6p
   <div id="ctfScores"></div>
 </div>
 
+<div class="card hidden" id="liveScoreCard">
+  <h2 id="liveScoreTitle">&#127919; Spielstand</h2>
+  <div id="liveScores"></div>
+</div>
+
 <div class="card hidden" id="hsCard">
   <h2>&#127942; Bestenliste</h2>
   <table><thead><tr><th>#</th><th>Name</th><th>Punkte</th><th>Beste Zeit</th></tr></thead>
@@ -1301,10 +1317,30 @@ function fmtTime(s){if(s<=0)return'0:00';return Math.floor(s/60)+':'+(s%60<10?'0
 
 function updateStatus(){
   fetch('/status').then(function(r){return r.json();}).then(function(d){
-    document.getElementById('nodeCount').textContent=d.nodes;
+    var nl=d.nodeList||[];
+    var online=0;nl.forEach(function(n){if(n.on)online++;});
+    document.getElementById('nodeCount').textContent=online+' / '+d.nodes;
     if(d.nodes!==knownNodes){knownNodes=d.nodes;updateNameInputs(d.nodes);}
+
+    // Node-Chips: gruen=verbunden, rot=offline
     var g=document.getElementById('nodesGrid');g.innerHTML='';
-    for(var i=1;i<=Math.max(d.nodes,1);i++){var dot=document.createElement('div');dot.className='nd'+(i<=d.nodes?' on':'');dot.textContent=i;g.appendChild(dot);}
+    if(nl.length===0){var ph=document.createElement('div');ph.className='nd';ph.textContent='–';g.appendChild(ph);}
+    nl.forEach(function(n){var dot=document.createElement('div');dot.className='nd'+(n.on?' on':' off');dot.textContent=n.id;dot.title=n.name+(n.on?' (verbunden)':' (offline)');g.appendChild(dot);});
+
+    // Spielerliste mit Verbindungsstatus
+    var nn=document.getElementById('nodeNames');nn.innerHTML='';
+    nl.forEach(function(n){
+      var row=document.createElement('div');row.className='pl'+(n.on?'':' dead');
+      row.innerHTML='<span class="pdot '+(n.on?'on':'off')+'"></span>'
+        +'<span class="pname">'+n.name+'</span>'
+        +'<span class="pstat">'+(n.on?'verbunden':'offline')+'</span>';
+      nn.appendChild(row);
+    });
+
+    // Info-Zeile (Bombe/Simon/Tauziehen/Minesweeper)
+    var il=document.getElementById('infoLine');
+    if(d.running&&d.info&&d.info.length>0){il.classList.remove('hidden');il.textContent=d.info;}
+    else il.classList.add('hidden');
 
     var mb=document.getElementById('modeName');
     mb.textContent=d.running?(modeNames[d.mode]||'Spiel')+' laeuft':'Idle';
@@ -1328,6 +1364,25 @@ function updateStatus(){
           +'<div class="spts">'+d.scores[t]+'</div>';
         sv.appendChild(row);}
     } else cs.classList.add('hidden');
+
+    // Generischer Live-Spielstand (Memory, Kartoffel, King, Knockout, Farbjagd)
+    var lc=document.getElementById('liveScoreCard');
+    if(d.running&&d.scoreLabel&&d.scoreLabel.length>0&&nl.length>0){
+      lc.classList.remove('hidden');
+      document.getElementById('liveScoreTitle').innerHTML='&#127919; Spielstand &ndash; '+d.scoreLabel;
+      var lv=document.getElementById('liveScores');lv.innerHTML='';
+      var arr=nl.slice().sort(function(a,b){return b.v-a.v;});
+      var mxv=1;arr.forEach(function(n){if(n.v>mxv)mxv=n.v;});
+      arr.forEach(function(n,i){
+        var row=document.createElement('div');row.className='srow';
+        var pct=mxv>0?Math.round(n.v/mxv*100):0;
+        var col=!n.on?'#6e7681':i==0?'#3fb950':i==1?'#388bfd':'#8b949e';
+        row.innerHTML='<div class="rank">'+(i+1)+'</div>'
+          +'<div class="sname"'+(n.on?'':' style="color:#6e7681"')+'>'+n.name+(n.on?'':' &#9888;')+'</div>'
+          +'<div class="bar-wrap"><div class="bar-fill" style="background:'+col+';width:'+pct+'%"></div></div>'
+          +'<div class="spts">'+n.v+'</div>';
+        lv.appendChild(row);});
+    } else lc.classList.add('hidden');
 
     var rc=document.getElementById('reactLiveCard');
     if(d.running&&d.mode==4&&d.reactScores){
@@ -1386,6 +1441,52 @@ void webHandleStatus() {
   j+="\"mode\":"+String(gameMode)+",";
   j+="\"running\":"; j+=(gameMode!=GAME_IDLE?"true":"false"); j+=",";
   j+="\"timeLeft\":"+String(timeLeft);
+
+  // Pro-Node-Liste: Verbindungsstatus + spielspezifischer Punktestand
+  const char* scoreLabel="";
+  switch (gameMode) {
+    case GAME_MEMORY:    scoreLabel="Gefunden"; break;
+    case GAME_HOTPOTATO: scoreLabel="Leben";    break;
+    case GAME_KINGHILL:  scoreLabel="Sekunden"; break;
+    case GAME_KNOCKOUT:  scoreLabel="Leben";    break;
+    case GAME_COLORHUNT: scoreLabel="Punkte";   break;
+  }
+  j+=",\"scoreLabel\":\""+String(scoreLabel)+"\"";
+  j+=",\"nodeList\":[";
+  for (uint8_t i=1;i<=nodeCount;i++) {
+    uint16_t v=0;
+    switch (gameMode) {
+      case GAME_MEMORY:    v=memMatched[i]?1:0; break;
+      case GAME_HOTPOTATO: v=potatoLives[i];    break;
+      case GAME_KINGHILL: {
+        uint32_t hold=kingHoldTime[i];
+        if (kingHolder==i && kingLastCapture!=0) hold+=millis()-kingLastCapture;
+        v=hold/1000; break;
+      }
+      case GAME_KNOCKOUT:  v=knockLives[i];  break;
+      case GAME_COLORHUNT: v=huntScores[i];  break;
+    }
+    j+="{\"id\":"+String(i)+",\"name\":\""+String(players[i].name)+"\",";
+    j+="\"on\":"; j+=(nodes[i].active?"true":"false"); j+=",";
+    j+="\"v\":"+String(v)+"}";
+    if (i<nodeCount) j+=",";
+  }
+  j+="]";
+
+  // Info-Zeile fuer Spiele mit gemeinsamem Zustand (kein Pro-Node-Score)
+  String info="";
+  if (gameMode==GAME_BOMB) {
+    info="Bombe bei Node "+String(bombNode)+" - Schritt "+String(bombStep)+"/"+String(cfgSeqLen);
+  } else if (gameMode==GAME_SIMON) {
+    info="Simon-Sequenz: Laenge "+String(simonLen);
+  } else if (gameMode==GAME_TUGWAR) {
+    if      (tugScore>50) info="Tauziehen: ROT fuehrt";
+    else if (tugScore<50) info="Tauziehen: BLAU fuehrt";
+    else                  info="Tauziehen: Gleichstand";
+  } else if (gameMode==GAME_MINESWEEPER) {
+    info="Sicher gedeckt: "+String(mineScore)+"/"+String(mineSafeCount)+" - Leben: "+String(mineLives);
+  }
+  j+=",\"info\":\""+info+"\"";
 
   if (gameMode==GAME_CTF) {
     j+=",\"scores\":{";
