@@ -96,7 +96,7 @@ void allLED(uint8_t color, uint8_t anim) {
 // CTF
 // ─────────────────────────────────────────────────────────────
 static const uint8_t TEAM_COLORS[] = {COL_WHITE,COL_RED,COL_BLUE,COL_GREEN,COL_YELLOW};
-static const char*   TEAM_NAMES[]  = {"Neutral","ROT","BLAU","GRÜN","GELB"};
+static const char*   TEAM_NAMES[]  = {"Neutral","ROT","BLAU","GRUEN","GELB"};
 
 void ctfStart() {
   if (nodeCount<2) { Serial.println("[CTF] Mindestens 2 Nodes nötig."); return; }
@@ -242,7 +242,10 @@ void handleUDP() {
         if (nodes[i].ip==remoteIP) { nodes[i].lastSeen=millis(); sendPkt(remoteIP,PKT_ACK,i,i); return; }
       }
       if (nodeCount>=MAX_NODES) return;
-      nodeCount++; nodes[nodeCount]={remoteIP,true,millis()};
+      nodeCount++;
+      nodes[nodeCount].ip       = remoteIP;
+      nodes[nodeCount].active   = true;
+      nodes[nodeCount].lastSeen = millis();
       sendPkt(remoteIP,PKT_ACK,nodeCount,nodeCount);
       Serial.printf("[REG] Node %u (%s)\n",nodeCount,remoteIP.toString().c_str());
       break;
@@ -510,7 +513,8 @@ void setup() {
   Serial.println("\n=== ESP CTF Game – Master ===");
 
   WiFi.mode(WIFI_AP);
-  WiFi.softAP(WIFI_SSID, *WIFI_PASS ? WIFI_PASS : nullptr);
+  if (strlen(WIFI_PASS) > 0) WiFi.softAP(WIFI_SSID, WIFI_PASS);
+  else WiFi.softAP(WIFI_SSID);
   Serial.printf("WiFi-AP: %s  IP: %s\n", WIFI_SSID, WiFi.softAPIP().toString().c_str());
 
   udp.begin(UDP_PORT);

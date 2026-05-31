@@ -10,6 +10,10 @@
  *   - Executes animations (solid, blink, pulse, flash)
  */
 
+// config.h MUSS zuerst kommen – definiert LED_NEOPIXEL, Pins, etc.
+#include "config.h"
+#include "protocol.h"
+
 #ifdef ESP32
   #include <WiFi.h>
 #else
@@ -20,9 +24,6 @@
 #ifdef LED_NEOPIXEL
   #include <Adafruit_NeoPixel.h>
 #endif
-
-#include "config.h"
-#include "protocol.h"
 
 // ─────────────────────────────────────────────────────────────
 // LED
@@ -222,7 +223,8 @@ void handleUDP() {
 void connectWiFi() {
   Serial.printf("\nConnecting to '%s'", WIFI_SSID);
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, *WIFI_PASS ? WIFI_PASS : nullptr);
+  if (strlen(WIFI_PASS) > 0) WiFi.begin(WIFI_SSID, WIFI_PASS);
+  else WiFi.begin(WIFI_SSID);
 
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED) {
@@ -230,7 +232,8 @@ void connectWiFi() {
       Serial.println("\n[WARN] WiFi timeout, retrying...");
       WiFi.disconnect();
       delay(1000);
-      WiFi.begin(WIFI_SSID, *WIFI_PASS ? WIFI_PASS : nullptr);
+      if (strlen(WIFI_PASS) > 0) WiFi.begin(WIFI_SSID, WIFI_PASS);
+      else WiFi.begin(WIFI_SSID);
       start = millis();
     }
     // Blink while connecting
