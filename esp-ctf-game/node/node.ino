@@ -6,8 +6,8 @@
  *   - Connects to the master's WiFi AP
  *   - Registers itself and receives a node ID
  *   - Monitors a button (with debounce)
- *   - Drives an RGB LED (NeoPixel or 3-pin RGB)
- *   - Executes animations (solid, blink, pulse, flash)
+ *   - Drives an RGB LED (NeoPixel WS2812B-8 bar or 3-pin RGB)
+ *   - Executes animations (solid, blink, pulse, flash, bar, split)
  */
 
 // config.h MUSS zuerst kommen – definiert LED_NEOPIXEL, Pins, etc.
@@ -76,15 +76,17 @@ struct LedState {
   uint32_t lastChange;
   uint8_t  phase;       // toggle/step counter
   bool     flashDone;
+  uint8_t  barCount;    // for ANIM_BAR / ANIM_SPLIT: number of leading LEDs
+  uint8_t  barBg;       // for ANIM_BAR: background color index (trailing LEDs)
 };
-LedState led = {COL_OFF, ANIM_SOLID, 0, 0, false};
+LedState led = {COL_OFF, ANIM_SOLID, 0, 0, false, 0, COL_OFF};
 
 void setLed(uint8_t colorIdx, uint8_t anim) {
-  led.colorIdx  = (colorIdx < NUM_COLORS) ? colorIdx : 0;
-  led.anim      = anim;
+  led.colorIdx   = (colorIdx < NUM_COLORS) ? colorIdx : 0;
+  led.anim       = anim;
   led.lastChange = millis();
-  led.phase     = 0;
-  led.flashDone = false;
+  led.phase      = 0;
+  led.flashDone  = false;
 }
 
 void updateLed() {
@@ -138,6 +140,30 @@ void updateLed() {
         applyColor(color);
       }
       break;
+
+    case ANIM_BAR:
+#ifdef LED_NEOPIXEL
+      for (int i = 0; i < NEO_COUNT; i++) {
+        uint32_t c = (i < led.barCount) ? COLORS[led.colorIdx] : COLORS[led.barBg];
+        strip.setPixelColor(i, c);
+      }
+      strip.show();
+#else
+      applyColor((led.barCount > 0) ? color : COLORS[led.barBg]);
+#endif
+      break;
+
+    case ANIM_SPLIT:
+#ifdef LED_NEOPIXEL
+      for (int i = 0; i < NEO_COUNT; i++) {
+        uint32_t c = (i < led.barCount) ? COLORS[led.colorIdx] : COLORS[led.barBg];
+        strip.setPixelColor(i, c);
+      }
+      strip.show();
+#else
+      applyColor((led.barCount >= 4) ? color : COLORS[led.barBg]);
+#endif
+      break;
   }
 }
 
@@ -145,9 +171,9 @@ void updateLed() {
 // Button
 // ─────────────────────────────────────────────────────────────
 
-bool     lastRaw      = HIGH;
+bool     lastRaw       = HIGH;
 bool     lastDebounced = HIGH;
-uint32_t lastChangeTs = 0;
+uint32_t lastChangeTs  = 0;
 
 // Returns true on the falling edge (press)
 bool buttonPressed() {
@@ -171,9 +197,9 @@ bool buttonPressed() {
 
 WiFiUDP  udp;
 IPAddress masterIP;
-uint8_t  myId        = 0;
+uint8_t  myId         = 0;
 uint32_t lastRegister = 0;
-uint32_t lastPing    = 0;
+uint32_t lastPing     = 0;
 
 void sendPkt(uint8_t type, uint8_t nid,
              uint8_t d0=0,uint8_t d1=0,uint8_t d2=0,
@@ -204,6 +230,24 @@ void handleUDP() {
     case PKT_SET_LED:
       if (p.nodeId == myId || p.nodeId == 0xFF)
         setLed(p.data[0], p.data[1]);
+      break;
+
+    case PKT_SET_BAR:
+      if (p.nodeId == myId || p.nodeId == 0xFF) {
+        led.colorIdx = p.data[0];
+        led.anim     = ANIM_BAR;
+        led.barCount = (p.data[1] < NEO_COUNT) ? p.data[1] : NEO_COUNT;
+        led.barBg    = p.data[2];
+      }
+      break;
+
+    case PKT_SET_SPLIT:
+      if (p.nodeId == myId || p.nodeId == 0xFF) {
+        led.colorIdx = p.data[0];
+        led.anim     = ANIM_SPLIT;
+        led.barCount = (p.data[1] < NEO_COUNT) ? p.data[1] : NEO_COUNT;
+        led.barBg    = p.data[2];
+      }
       break;
 
     case PKT_GAME_START:
