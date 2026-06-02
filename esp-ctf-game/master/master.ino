@@ -1287,6 +1287,11 @@ td{padding:4px 6px;border-bottom:1px solid #21262d}
 details{margin:10px 0 4px}
 summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6px 0;user-select:none}
 .instr{background:#0d1117;border-radius:8px;padding:10px 12px;margin-top:6px;color:#c9d1d9;font-size:.84rem;line-height:1.55}
+.cnc{display:flex;flex-wrap:wrap;gap:8px}
+.cnchip{display:flex;flex-direction:column;align-items:center;min-width:54px;padding:6px 8px;border-radius:8px;background:#0d1117;border:2px solid #30363d}
+.cnchip .dot{width:22px;height:22px;border-radius:50%;border:1px solid #00000055;margin-bottom:4px}
+.cnchip .lbl{font-size:.72rem;color:#c9d1d9;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cnchip.off{opacity:.45}
 </style></head>
 <body>
 <h1>&#127918; ESP CTF Game</h1>
@@ -1398,6 +1403,8 @@ summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6p
 <div class="card hidden" id="ctfScoreCard">
   <h2>&#127987; CTF &ndash; Eroberte Nodes pro Team</h2>
   <div id="ctfScores"></div>
+  <h3 style="margin:14px 0 6px;font-size:.95rem;color:#a8dadc">Aktuelle Farbe je Node</h3>
+  <div id="ctfNodeColors" class="cnc"></div>
 </div>
 
 <div class="card hidden" id="liveScoreCard">
@@ -1550,6 +1557,15 @@ function updateStatus(){
           +'<div class="bar-wrap"><div class="bar-fill" style="background:#8b949e;width:'+(mx>0?Math.round(d.neutral/mx*100):0)+'%"></div></div>'
           +'<div class="spts">'+d.neutral+' Node'+(d.neutral==1?'':'s')+'</div>';
         sv.appendChild(nr);}
+      // Aktuelle Farbe je Node
+      var nc=document.getElementById('ctfNodeColors');nc.innerHTML='';
+      nl.forEach(function(n){
+        var t=(n.team===undefined)?0:n.team;
+        var chip=document.createElement('div');chip.className='cnchip'+(n.on?'':' off');
+        chip.innerHTML='<div class="dot" style="background:'+tc[t]+'"></div>'
+          +'<div class="lbl">'+n.id+'. '+n.name+'</div>';
+        chip.title=n.name+' -> '+(['Neutral','ROT','BLAU','GRUEN','GELB'][t]||'?');
+        nc.appendChild(chip);});
     } else cs.classList.add('hidden');
 
     // Generischer Live-Spielstand (Memory, Kartoffel, King, Knockout, Farbjagd)
@@ -1669,6 +1685,7 @@ void webHandleStatus() {
     }
     j+="{\"id\":"+String(i)+",\"name\":\""+String(players[i].name)+"\",";
     j+="\"on\":"; j+=(nodes[i].active?"true":"false"); j+=",";
+    j+="\"team\":"+String(gameMode==GAME_CTF?ctfTeam[i]:0)+",";
     j+="\"v\":"+String(v)+"}";
     if (i<nodeCount) j+=",";
   }
