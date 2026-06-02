@@ -80,6 +80,7 @@ uint8_t  memTotalPairs, memFoundPairs;
 // Bomb
 uint8_t  bombNode, bombStep;
 uint8_t  bombSeq[16];
+uint8_t  bombSeqLen;   // tatsaechlich verwendete Sequenzlaenge (<= verfuegbare Nodes)
 bool     bombOver;
 
 // Reaktion
@@ -241,7 +242,9 @@ void memStart() {
   if (nodeCount<2) { Serial.println("[MEM] Mindestens 2 Nodes."); return; }
   gameMode=GAME_MEMORY;
   uint8_t n=(nodeCount%2==0)?nodeCount:nodeCount-1;
-  memTotalPairs=n/2; memFoundPairs=0;
+  memTotalPairs=n/2;
+  if (memTotalPairs>7) { memTotalPairs=7; n=14; }  // Palette hat nur 7 Farben -> sonst nicht unterscheidbar
+  memFoundPairs=0;
   memPending[0]=memPending[1]=-1; memHideAt=0;
   uint8_t pool[MAX_NODES];
   for (uint8_t i=0;i<memTotalPairs;i++) { pool[2*i]=PAIR_PALETTE[i%7]; pool[2*i+1]=PAIR_PALETTE[i%7]; }
@@ -267,7 +270,7 @@ void memOnButton(uint8_t id) {
       memMatched[memPending[0]]=memMatched[id]=true;
       setLED(memPending[0],COL_GREEN,ANIM_PULSE); setLED(id,COL_GREEN,ANIM_PULSE);
       memFoundPairs++; memPending[0]=memPending[1]=-1;
-      if (memFoundPairs==memTotalPairs) { delay(400); allLED(COL_GREEN,ANIM_BLINK_FAST); gameMode=GAME_IDLE; }
+      if (memFoundPairs==memTotalPairs) { delay(400); allLED(COL_GREEN,ANIM_BLINK_FAST); gameMode=GAME_IDLE; addHistory(GAME_MEMORY,"Geloest",memTotalPairs); }
     } else { memHideAt=millis()+1500; }
   }
 }
@@ -285,8 +288,7 @@ void memUpdate() {
 static const uint8_t SEQ_COLORS[] = {COL_RED,COL_BLUE,COL_GREEN,COL_YELLOW,COL_PURPLE,COL_CYAN,COL_ORANGE,COL_WHITE};
 
 void bombShowSequence() {
-  uint8_t len=min((uint8_t)cfgSeqLen,(uint8_t)16);
-  for (uint8_t s=0;s<len;s++) {
+  for (uint8_t s=0;s<bombSeqLen;s++) {
     setLED(bombSeq[s],SEQ_COLORS[s%8],ANIM_SOLID); delay(BOMB_STEP_MS);
     setLED(bombSeq[s],COL_OFF,ANIM_SOLID); delay(200);
   }
@@ -300,6 +302,8 @@ void bombStart() {
   uint8_t avail[MAX_NODES],cnt=0;
   for (uint8_t i=1;i<=nodeCount;i++) if(i!=bombNode) avail[cnt++]=i;
   uint8_t len=min((uint8_t)cfgSeqLen,cnt);
+  if (len>16) len=16;
+  bombSeqLen=len;
   for (uint8_t i=0;i<len;i++) { uint8_t p=random(0,cnt-i); bombSeq[i]=avail[p]; avail[p]=avail[cnt-i-1]; }
   allLED(COL_OFF,ANIM_SOLID); delay(200);
   setLED(bombNode,COL_RED,ANIM_BLINK_FAST);
@@ -310,16 +314,15 @@ void bombStart() {
 void bombOnButton(uint8_t id) {
   if (bombOver) return;
   if (id==bombNode) { bombShowSequence(); for (uint8_t i=1;i<=nodeCount;i++) { setLED(i,(i==bombNode)?COL_RED:COL_WHITE,(i==bombNode)?ANIM_BLINK_FAST:ANIM_SOLID); delay(20); } return; }
-  uint8_t len=min((uint8_t)cfgSeqLen,(uint8_t)16);
   if (id==bombSeq[bombStep]) {
     setLED(id,COL_GREEN,ANIM_FLASH); bombStep++;
-    if (bombStep==len) { bombOver=true; allLED(COL_GREEN,ANIM_BLINK_SLOW); gameMode=GAME_IDLE; Serial.println("[BOMB] ENTSCHAERFT!"); }
-  } else { bombOver=true; allLED(COL_RED,ANIM_BLINK_FAST); gameMode=GAME_IDLE; Serial.println("[BOMB] BOOM!"); }
+    if (bombStep==bombSeqLen) { bombOver=true; allLED(COL_GREEN,ANIM_BLINK_SLOW); gameMode=GAME_IDLE; Serial.println("[BOMB] ENTSCHAERFT!"); addHistory(GAME_BOMB,"Entschaerft",bombSeqLen); }
+  } else { bombOver=true; allLED(COL_RED,ANIM_BLINK_FAST); gameMode=GAME_IDLE; Serial.println("[BOMB] BOOM!"); addHistory(GAME_BOMB,"Explodiert",bombStep); }
 }
 
 void bombUpdate() {
   if (bombOver||(long)(millis()-gameEndTime)<0) return;
-  bombOver=true; allLED(COL_RED,ANIM_BLINK_FAST); gameMode=GAME_IDLE; Serial.println("[BOMB] ZEIT UM!");
+  bombOver=true; allLED(COL_RED,ANIM_BLINK_FAST); gameMode=GAME_IDLE; Serial.println("[BOMB] ZEIT UM!"); addHistory(GAME_BOMB,"Zeit abgelaufen",bombStep);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -443,6 +446,14 @@ void reactUpdate() {
 // Simon Says (Game 5)
 // ─────────────────────────────────────────────────────────────
 void simonNextRound() {
+  // Sequenz ist voll (Array-Groesse 20) -> Spiel als gewonnen beenden
+  if (simonLen >= 20) {
+    Serial.println("[SIMON] Maximale Sequenz erreicht - gewonnen!");
+    addHistory(GAME_SIMON, "Simon (max)", simonLen);
+    allLED(COL_GREEN, ANIM_BLINK_FAST);
+    gameMode = GAME_IDLE;
+    return;
+  }
   // Extend sequence by 1
   simonSeq[simonLen] = random(1, nodeCount+1);
   simonLen++;
@@ -841,6 +852,7 @@ void mineOnButton(uint8_t id) {
       // Game over
       allLED(COL_RED, ANIM_BLINK_FAST);
       Serial.println("[MINE] Game Over!");
+      addHistory(GAME_MINESWEEPER, "Explodiert", mineScore);
       gameMode = GAME_IDLE;
       return;
     }
@@ -854,6 +866,7 @@ void mineOnButton(uint8_t id) {
       // Win!
       allLED(COL_GREEN, ANIM_BLINK_FAST);
       Serial.println("[MINE] Alle sicheren Nodes gefunden! Gewonnen!");
+      addHistory(GAME_MINESWEEPER, "Geloest", mineScore);
       gameMode = GAME_IDLE;
     }
   }
@@ -893,6 +906,7 @@ void knockStart() {
   gameMode      = GAME_KNOCKOUT;
   knockRound    = 0;
   knockRoundDone = true;
+  knockGraceAt  = 0;   // wichtig: alte Gnadenfrist verwerfen, sonst sofortiger Lebensabzug
   knockNextAt   = millis() + 2000;
   for (uint8_t i=1;i<=nodeCount;i++) {
     knockActive[i]  = nodes[i].active;
@@ -910,16 +924,24 @@ void knockStart() {
 }
 
 void knockOnButton(uint8_t id) {
-  if (knockRoundDone || !knockActive[id]) return;
-  knockPressed[id] = true;
-  if (id == knockTarget) {
-    // First correct press – start grace period
-    setLED(id, COL_GREEN, ANIM_FLASH);
-    Serial.printf("[KNOCK] Node %u als erstes!\n", id);
-    knockGraceAt  = millis() + 2000;
-    knockRoundDone = true; // stop accepting new wins, still accept more presses
-  } else {
-    setLED(id, COL_WHITE, ANIM_SOLID); // acknowledge press
+  if (gameMode!=GAME_KNOCKOUT || !knockActive[id]) return;
+  if (!knockRoundDone) {
+    // Runde laeuft: Druck zaehlt, erster Treffer startet die Gnadenfrist
+    knockPressed[id] = true;
+    if (id == knockTarget) {
+      setLED(id, COL_GREEN, ANIM_FLASH);
+      Serial.printf("[KNOCK] Node %u als erstes!\n", id);
+      knockGraceAt   = millis() + 2000;
+      knockRoundDone = true;
+    } else {
+      setLED(id, COL_WHITE, ANIM_SOLID); // Druck bestaetigen
+    }
+  } else if (knockGraceAt != 0) {
+    // Gnadenfrist: weitere Spieler koennen noch druecken und Strafe vermeiden
+    if (!knockPressed[id]) {
+      knockPressed[id] = true;
+      setLED(id, COL_WHITE, ANIM_SOLID);
+    }
   }
 }
 
