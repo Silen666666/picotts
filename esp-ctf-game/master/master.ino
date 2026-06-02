@@ -1231,7 +1231,7 @@ label{display:block;color:#8b949e;font-size:.83rem;margin:9px 0 3px}
 select,input[type=number],input[type=text]{width:100%;padding:8px 11px;background:#21262d;border:1px solid #30363d;border-radius:7px;color:#e6edf3;font-size:.93rem}
 .hidden{display:none}
 .btn{width:100%;padding:12px;border:none;border-radius:8px;font-size:.97rem;font-weight:700;cursor:pointer;margin-top:7px}
-.btn-start{background:#238636;color:#fff}.btn-stop{background:#b91c1c;color:#fff}.btn-save{background:#0f3460;color:#a8dadc}
+.btn-start{background:#238636;color:#fff}.btn-stop{background:#b91c1c;color:#fff}.btn-save{background:#0f3460;color:#a8dadc}.btn-reset{background:#6e40c9;color:#fff}
 .name-row{display:flex;align-items:center;gap:8px;margin:5px 0}
 .node-lbl{min-width:60px;font-size:.82rem;color:#8b949e;font-weight:600}
 .srow{display:flex;align-items:center;gap:6px;margin:5px 0}
@@ -1364,6 +1364,7 @@ summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6p
   </div>
   <button class="btn btn-start" onclick="startGame()">&#9654; STARTEN</button>
   <button class="btn btn-stop" onclick="stopGame()">&#9632; STOPPEN</button>
+  <button class="btn btn-reset" onclick="resetNodes()">&#128260; NODES RECONNECT</button>
 </div>
 
 <div class="card hidden" id="reactLiveCard">
@@ -1449,6 +1450,7 @@ function startGame(){
   post('/start',q);
 }
 function stopGame(){post('/stop','');}
+function resetNodes(){post('/reset','').then(function(){var b=document.querySelector('.btn-reset');var orig=b.innerHTML;b.textContent='Gesendet...';setTimeout(function(){b.innerHTML=orig;},1500);});}
 
 function saveNames(){
   var q='';
@@ -1738,6 +1740,29 @@ void webHandleStop() {
   webServer.send(200,"text/plain","OK");
 }
 
+void resetNodes() {
+  gameMode = GAME_IDLE;
+  // Broadcast PKT_RESET so connected nodes clear their ID
+  Packet p; p.type=PKT_RESET; p.nodeId=0xFF;
+  memset(p.data,0,sizeof(p.data));
+  udp.beginPacket(bcastIP, UDP_PORT);
+  udp.write((uint8_t*)&p, sizeof(p));
+  udp.endPacket();
+  delay(50);
+  // Clear registry
+  for (uint8_t i=1;i<=nodeCount;i++) {
+    nodes[i].active   = false;
+    nodes[i].lastSeen = 0;
+  }
+  nodeCount = 0;
+  Serial.println("[RESET] Node-Liste geleert, Nodes re-registrieren sich.");
+}
+
+void webHandleReset() {
+  resetNodes();
+  webServer.send(200,"text/plain","OK");
+}
+
 void webHandleNames() {
   for (uint8_t i=1;i<=MAX_NODES;i++) {
     String key="n"+String(i);
@@ -1781,6 +1806,7 @@ void handleSerial() {
   else if (c=='h') huntStart();
   else if (c=='w') whamStart();
   else if (c=='0') { gameMode=GAME_IDLE; allLED(COL_OFF,ANIM_SOLID); Serial.println("Gestoppt."); }
+  else if (c=='r') { resetNodes(); }
   else if (c=='s') {
     Serial.printf("Modus:%u Nodes:%u\n",gameMode,nodeCount);
     for (uint8_t i=1;i<=nodeCount;i++)
@@ -1814,12 +1840,13 @@ void setup() {
   webServer.on("/stop",   HTTP_POST, webHandleStop);
   webServer.on("/names",  HTTP_POST, webHandleNames);
   webServer.on("/clearscores", HTTP_POST, webHandleClearScores);
+  webServer.on("/reset",       HTTP_POST, webHandleReset);
   webServer.begin();
 
   Serial.println("Web: http://192.168.4.1");
   Serial.println("Seriell: 1=CTF 2=Memory 3=Bomb 4=Reaktion 5=Simon 6=HotPotato");
   Serial.println("         7=KingHill 8=TugWar 9=Minesweeper k=Knockout h=ColorHunt w=WhackaMole");
-  Serial.println("         0=Stop s=Status");
+  Serial.println("         0=Stop s=Status r=Reset/Reconnect");
 }
 
 void loop() {

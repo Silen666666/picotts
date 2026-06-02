@@ -15,6 +15,7 @@
                               // data[0]=color, data[1]=count(0-8), data[2]=bgColor
 #define PKT_SET_SPLIT  0x09  // Master→Node: split bar
                               // data[0]=colorA, data[1]=countA(0-8), data[2]=colorB
+#define PKT_RESET      0x0A  // Master→All: clear ID, re-register
 
 // Colors (index into COLORS[] on the node)
 #define COL_OFF     0

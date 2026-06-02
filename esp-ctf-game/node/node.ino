@@ -257,6 +257,13 @@ void handleUDP() {
     case PKT_GAME_OVER:
       Serial.println("[NODE] Game over");
       break;
+
+    case PKT_RESET:
+      Serial.println("[NODE] Reset empfangen – re-registriere...");
+      myId = 0;
+      lastRegister = 0;
+      setLed(COL_BLUE, ANIM_BLINK_SLOW);
+      break;
   }
 }
 
@@ -325,9 +332,14 @@ void setup() {
 }
 
 void loop() {
-  // Reconnect if WiFi dropped
+  // Reconnect if WiFi dropped – reset ID so node re-registers after reconnect
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("[WARN] WiFi lost, reconnecting...");
+    if (myId != 0) {
+      Serial.println("[WARN] WiFi lost – ID zurueckgesetzt, warte auf Neuregistrierung");
+      myId = 0;
+      lastRegister = 0;
+      setLed(COL_BLUE, ANIM_BLINK_SLOW);
+    }
     connectWiFi();
   }
 
