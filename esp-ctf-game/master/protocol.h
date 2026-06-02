@@ -49,6 +49,7 @@
 #define GAME_MINESWEEPER 9
 #define GAME_KNOCKOUT    10
 #define GAME_COLORHUNT   11
+#define GAME_WHACKAMOLE  12
 
 struct Packet {
   uint8_t type;

@@ -144,6 +144,22 @@ uint8_t  huntRound;
 bool     huntRoundActive;
 uint32_t huntNextAt;
 
+// Whack-a-Mole
+uint8_t  whamRound;
+uint8_t  whamTarget;
+uint8_t  whamScores[MAX_NODES + 1];
+uint32_t whamLitAt;
+uint32_t whamNextAt;
+bool     whamRoundDone;
+uint8_t  cfgWhamRounds   = WHAM_ROUNDS_DEFAULT;
+
+// Spielverlauf
+struct GameRecord { uint8_t mode; char winner[20]; uint16_t score; };
+GameRecord gameHistory[MAX_HISTORY];
+uint8_t    historyCount  = 0;
+uint8_t    cfgMaxHistory = MAX_HISTORY;
+uint16_t   totalGames    = 0;
+
 // ─────────────────────────────────────────────────────────────
 // Netzwerk-Helfer
 // ─────────────────────────────────────────────────────────────
@@ -211,6 +227,7 @@ void ctfUpdate() {
   uint8_t winner=1;
   for (uint8_t t=2;t<=cfgTeams;t++) if(score[t]>score[winner]) winner=t;
   for (uint8_t t=1;t<=cfgTeams;t++) Serial.printf("[CTF] %s: %u\n",TEAM_NAMES[t],score[t]);
+  addHistory(GAME_CTF, TEAM_NAMES[winner], score[winner]);
   allLED(TEAM_COLORS[winner],ANIM_BLINK_FAST);
   gameMode=GAME_IDLE;
 }
@@ -329,6 +346,24 @@ void reactInsertHighScore(uint8_t id) {
   if (highScoreCount < MAX_HIGHSCORES) highScoreCount++;
 }
 
+void addHistory(uint8_t mode, const char* winner, uint16_t score) {
+  totalGames++;
+  uint8_t cap = (cfgMaxHistory < MAX_HISTORY) ? cfgMaxHistory : MAX_HISTORY;
+  if (historyCount < cap) {
+    gameHistory[historyCount].mode  = mode;
+    strncpy(gameHistory[historyCount].winner, winner, 19);
+    gameHistory[historyCount].winner[19] = 0;
+    gameHistory[historyCount].score = score;
+    historyCount++;
+  } else {
+    for (uint8_t i=0; i<cap-1; i++) gameHistory[i] = gameHistory[i+1];
+    gameHistory[cap-1].mode  = mode;
+    strncpy(gameHistory[cap-1].winner, winner, 19);
+    gameHistory[cap-1].winner[19] = 0;
+    gameHistory[cap-1].score = score;
+  }
+}
+
 void reactStartRound() {
   if (reactRound >= cfgReactRounds) {
     uint8_t winner=1;
@@ -337,6 +372,7 @@ void reactStartRound() {
     for (uint8_t i=1;i<=nodeCount;i++)
       Serial.printf("  %s: %u Pkt  Best: %ums\n", players[i].name, players[i].points, players[i].bestMs);
     for (uint8_t i=1;i<=nodeCount;i++) reactInsertHighScore(i);
+    addHistory(GAME_REACTION, players[winner].name, players[winner].points);
     allLED(COL_OFF, ANIM_SOLID); delay(200);
     setLED(winner, COL_GREEN, ANIM_BLINK_FAST);
     for (uint8_t i=1;i<=nodeCount;i++) if(i!=winner) setLED(i,COL_RED,ANIM_SOLID);
@@ -446,6 +482,7 @@ void simonOnButton(uint8_t id) {
   } else {
     // Wrong press – game over
     Serial.printf("[SIMON] Falsch! Erreichte Runde: %u\n", simonLen);
+    addHistory(GAME_SIMON, "Simon", simonLen);
     allLED(COL_RED, ANIM_BLINK_FAST);
     delay(1500);
     allLED(COL_OFF, ANIM_SOLID);
@@ -667,6 +704,7 @@ void kingUpdate() {
     for (uint8_t i=2;i<=nodeCount;i++) if(kingHoldTime[i]>kingHoldTime[winner]) winner=i;
     Serial.printf("[KING] Spiel beendet! Gewinner: Node %u (%s) mit %ums\n",
       winner, players[winner].name, kingHoldTime[winner]);
+    addHistory(GAME_KINGHILL, players[winner].name, kingHoldTime[winner]/1000);
     allLED(COL_OFF, ANIM_SOLID);
     setLED(winner, COL_YELLOW, ANIM_BLINK_FAST);
     gameMode = GAME_IDLE;
@@ -712,10 +750,12 @@ void tugOnButton(uint8_t id) {
   if (tugScore >= 100) {
     Serial.println("[TUG] Team A (ROT) gewinnt!");
     allLED(COL_RED, ANIM_BLINK_FAST);
+    addHistory(GAME_TUGWAR, "ROT", tugScore);
     gameMode = GAME_IDLE;
   } else if (tugScore <= 0) {
     Serial.println("[TUG] Team B (BLAU) gewinnt!");
     allLED(COL_BLUE, ANIM_BLINK_FAST);
+    addHistory(GAME_TUGWAR, "BLAU", 100-tugScore);
     gameMode = GAME_IDLE;
   }
 }
@@ -724,10 +764,13 @@ void tugUpdate() {
   if ((long)(millis()-gameEndTime)<0) return;
   if (tugScore > 50) {
     Serial.println("[TUG] Zeit! Team A (ROT) gewinnt!"); allLED(COL_RED, ANIM_BLINK_FAST);
+    addHistory(GAME_TUGWAR, tugScore>50?"ROT":(tugScore<50?"BLAU":"Unentschieden"), (uint16_t)abs(tugScore-50));
   } else if (tugScore < 50) {
     Serial.println("[TUG] Zeit! Team B (BLAU) gewinnt!"); allLED(COL_BLUE, ANIM_BLINK_FAST);
+    addHistory(GAME_TUGWAR, tugScore>50?"ROT":(tugScore<50?"BLAU":"Unentschieden"), (uint16_t)abs(tugScore-50));
   } else {
     Serial.println("[TUG] Zeit! Unentschieden!"); allLED(COL_WHITE, ANIM_BLINK_SLOW);
+    addHistory(GAME_TUGWAR, "Unentschieden", 0);
   }
   gameMode = GAME_IDLE;
 }
@@ -906,11 +949,16 @@ void knockUpdate() {
       knockGraceAt = 0;
       if (knockRemaining <= 1) {
         // Find winner
+        uint8_t knockWinner = 0;
         for (uint8_t i=1;i<=nodeCount;i++) {
-          if (knockActive[i]) { setLED(i, COL_GREEN, ANIM_BLINK_FAST); break; }
+          if (knockActive[i]) { knockWinner=i; setLED(i, COL_GREEN, ANIM_BLINK_FAST); break; }
         }
         if (knockRemaining == 0) allLED(COL_WHITE, ANIM_BLINK_SLOW); // draw
         Serial.println("[KNOCK] Spiel beendet!");
+        if (knockRemaining == 1 && knockWinner > 0)
+          addHistory(GAME_KNOCKOUT, players[knockWinner].name, knockRound);
+        else
+          addHistory(GAME_KNOCKOUT, "Unentschieden", knockRound);
         gameMode = GAME_IDLE;
         return;
       }
@@ -940,6 +988,7 @@ void huntStartRound() {
     Serial.println("[HUNT] Spiel beendet!");
     for (uint8_t i=1;i<=nodeCount;i++)
       Serial.printf("  Node %u (%s): %u Pkt\n", i, players[i].name, huntScores[i]);
+    addHistory(GAME_COLORHUNT, players[winner].name, huntScores[winner]);
     allLED(COL_OFF, ANIM_SOLID);
     setLED(winner, COL_GREEN, ANIM_BLINK_FAST);
     gameMode = GAME_IDLE;
@@ -1028,6 +1077,87 @@ void huntUpdate() {
       setBar(1, COL_WHITE, 2, COL_OFF);
     }
     huntNextAt = now + 30000; // don't fire again for a while
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Whack-a-Mole (Game 12)
+// ─────────────────────────────────────────────────────────────
+static uint8_t whamLastTarget = 0;
+
+void whamStartRound() {
+  if (whamRound >= cfgWhamRounds) {
+    uint8_t winner=1;
+    for (uint8_t i=2;i<=nodeCount;i++) if(whamScores[i]>whamScores[winner]) winner=i;
+    Serial.println("[WHAM] === ENDE ===");
+    for (uint8_t i=1;i<=nodeCount;i++)
+      Serial.printf("  %s: %u Treffer\n", players[i].name, whamScores[i]);
+    allLED(COL_OFF, ANIM_SOLID); delay(200);
+    setLED(winner, COL_GREEN, ANIM_BLINK_FAST);
+    for (uint8_t i=1;i<=nodeCount;i++) if(i!=winner) setLED(i,COL_RED,ANIM_SOLID);
+    addHistory(GAME_WHACKAMOLE, players[winner].name, whamScores[winner]);
+    gameMode = GAME_IDLE;
+    return;
+  }
+  uint8_t tries=0;
+  do { whamTarget=random(1,nodeCount+1); tries++; }
+  while (whamTarget==whamLastTarget && nodeCount>1 && tries<20);
+  whamLastTarget = whamTarget;
+  for (uint8_t i=1;i<=nodeCount;i++) {
+    setLED(i,(i==whamTarget)?COL_YELLOW:COL_OFF,(i==whamTarget)?ANIM_BLINK_FAST:ANIM_SOLID);
+    delay(10);
+  }
+  whamLitAt     = millis();
+  whamRoundDone = false;
+  whamRound++;
+  Serial.printf("[WHAM] Runde %u/%u - Node %u leuchtet!\n", whamRound, cfgWhamRounds, whamTarget);
+}
+
+void whamStart() {
+  if (nodeCount<2) { Serial.println("[WHAM] Mindestens 2 Nodes."); return; }
+  gameMode      = GAME_WHACKAMOLE;
+  whamRound     = 0;
+  whamRoundDone = true;
+  whamLastTarget = 0;
+  randomSeed(millis());
+  for (uint8_t i=1;i<=nodeCount;i++) {
+    whamScores[i]=0; players[i].points=0;
+    if (players[i].name[0]==0) snprintf(players[i].name,20,"Node %u",i);
+    setLED(i,COL_OFF,ANIM_SOLID); delay(10);
+  }
+  for (uint8_t c=3;c>0;c--) {
+    allLED(COL_WHITE,ANIM_SOLID); delay(400);
+    allLED(COL_OFF,ANIM_SOLID);   delay(300);
+  }
+  whamNextAt = millis() + random(WHAM_DELAY_MIN_MS, WHAM_DELAY_MAX_MS);
+  Serial.printf("[WHAM] Start! %u Runden\n", cfgWhamRounds);
+}
+
+void whamOnButton(uint8_t id) {
+  if (whamRoundDone || gameMode!=GAME_WHACKAMOLE) return;
+  if (id == whamTarget) {
+    whamRoundDone = true;
+    whamScores[id]++;
+    players[id].points++;
+    Serial.printf("[WHAM] %s trifft! Punkte: %u\n", players[id].name, whamScores[id]);
+    setLED(id, COL_GREEN, ANIM_FLASH);
+    for (uint8_t i=1;i<=nodeCount;i++) if(i!=id) setLED(i,COL_OFF,ANIM_SOLID);
+    whamNextAt = millis() + random(WHAM_DELAY_MIN_MS, WHAM_DELAY_MAX_MS);
+  } else {
+    setLED(id, COL_RED, ANIM_BLINK_FAST);
+  }
+}
+
+void whamUpdate() {
+  if (gameMode!=GAME_WHACKAMOLE) return;
+  uint32_t now = millis();
+  if (whamRoundDone) {
+    if ((long)(now - whamNextAt) >= 0) whamStartRound();
+  } else if (now - whamLitAt > WHAM_TIMEOUT_MS) {
+    whamRoundDone = true;
+    setLED(whamTarget, COL_RED, ANIM_BLINK_FAST);
+    Serial.printf("[WHAM] Timeout! Node %u nicht getroffen.\n", whamTarget);
+    whamNextAt = millis() + random(WHAM_DELAY_MIN_MS, WHAM_DELAY_MAX_MS);
   }
 }
 

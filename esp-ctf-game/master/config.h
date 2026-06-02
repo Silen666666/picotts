@@ -34,3 +34,12 @@
 
 // Color Hunt
 #define COLORHUNT_ROUNDS    8
+
+// Whack-a-Mole
+#define WHAM_ROUNDS_DEFAULT  15
+#define WHAM_TIMEOUT_MS      3000UL
+#define WHAM_DELAY_MIN_MS    400
+#define WHAM_DELAY_MAX_MS    1800
+
+// Game History
+#define MAX_HISTORY  20
