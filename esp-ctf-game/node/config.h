@@ -11,14 +11,14 @@
 // Pin assignments
 // ----------------------------------------------------------------
 #ifdef ESP32
-  // NeoPixel
-  #define NEO_PIN    13
+  // NeoPixel – D13 header pin on 30-pin NodeMCU
+  #define NEO_PIN    13   // labeled D13 on board
   // Simple RGB LED
   #define LED_R_PIN  25
   #define LED_G_PIN  26
   #define LED_B_PIN  27
-  // Button (active LOW, internal pull-up)
-  #define BUTTON_PIN  0
+  // Button (active LOW, internal pull-up) – D18 header pin (GPIO0/BOOT not on header)
+  #define BUTTON_PIN  18  // labeled D18 on board
 #else  // ESP8266 NodeMCU / Wemos D1 mini
   // NeoPixel  – sicherer Pin (kein Boot-Strapping)
   #define NEO_PIN     4    // D2 (GPIO4)
