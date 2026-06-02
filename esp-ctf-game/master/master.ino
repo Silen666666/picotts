@@ -5,7 +5,7 @@
  * Handy: WLAN "ESP-CTF-Game" → Browser http://192.168.4.1
  * Seriell (115200):
  *   1=CTF  2=Memory  3=Bomb  4=Reaktion  5=Simon  6=HotPotato
- *   7=KingHill  8=TugWar  9=Minesweeper  k=Knockout  h=ColorHunt
+ *   7=KingHill  8=TugWar  9=Minesweeper  k=Knockout  h=ColorHunt  w=WhackaMole
  *   0=Stop  s=Status
  */
 
@@ -1205,6 +1205,7 @@ void handleUDP() {
       else if (gameMode==GAME_MINESWEEPER) mineOnButton(id);
       else if (gameMode==GAME_KNOCKOUT)    knockOnButton(id);
       else if (gameMode==GAME_COLORHUNT)   huntOnButton(id);
+      else if (gameMode==GAME_WHACKAMOLE)   whamOnButton(id);
       break;
     }
   }
@@ -1259,6 +1260,7 @@ table{width:100%;border-collapse:collapse;font-size:.88rem}
 th{color:#8b949e;font-weight:600;padding:4px 6px;text-align:left;border-bottom:1px solid #30363d}
 td{padding:4px 6px;border-bottom:1px solid #21262d}
 .gold{color:#f0883e}.silver{color:#8b949e}.bronze{color:#cd7f32}
+.hist-mode{font-size:.75rem;color:#8b949e;margin-right:4px}
 .rnd{text-align:center;font-size:1.1rem;font-weight:700;margin:6px 0;color:#a8dadc}
 details{margin:10px 0 4px}
 summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6px 0;user-select:none}
@@ -1298,6 +1300,7 @@ summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6p
     <option value="9">&#128163; Minesweeper</option>
     <option value="10">&#128293; Knockout</option>
     <option value="11">&#127752; Farbjagd</option>
+    <option value="12">&#127992; Whack-a-Mole</option>
   </select>
 
   <details id="instrDetails">
@@ -1346,6 +1349,19 @@ summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6p
     <label>Anzahl Runden</label>
     <input type="number" id="hrounds" value="8" min="3" max="20">
   </div>
+  <div id="whamOpts" class="hidden">
+    <label>Anzahl Runden</label>
+    <select id="whamRounds">
+      <option value="10">10 Runden</option>
+      <option value="15" selected>15 Runden</option>
+      <option value="20">20 Runden</option>
+      <option value="30">30 Runden</option>
+    </select>
+  </div>
+  <div id="generalOpts">
+    <label>Spielverlauf speichern (Anzahl)</label>
+    <input type="number" id="historySize" value="20" min="3" max="20">
+  </div>
   <button class="btn btn-start" onclick="startGame()">&#9654; STARTEN</button>
   <button class="btn btn-stop" onclick="stopGame()">&#9632; STOPPEN</button>
 </div>
@@ -1373,8 +1389,14 @@ summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6p
   <button class="btn btn-stop" style="margin-top:10px;font-size:.82rem;padding:8px" onclick="clearScores()">&#128465; Bestenliste l&ouml;schen</button>
 </div>
 
+<div class="card hidden" id="histCard">
+  <h2>&#128196; Spielverlauf</h2>
+  <table><thead><tr><th>#</th><th>Spiel</th><th>Gewinner</th><th>Punkte</th></tr></thead>
+  <tbody id="histTbody"></tbody></table>
+</div>
+
 <script>
-var modeNames=['Idle','CTF','Memory','Bomb','Reaktion','Simon Says','Heisse Kartoffel','King of the Hill','Tauziehen','Minesweeper','Knockout','Farbjagd'];
+var modeNames=['Idle','CTF','Memory','Bomb','Reaktion','Simon Says','Heisse Kartoffel','King of the Hill','Tauziehen','Minesweeper','Knockout','Farbjagd','Whack-a-Mole'];
 var tc=['#8b949e','#f85149','#388bfd','#3fb950','#e3b341'];
 var knownNodes=0;
 
@@ -1389,7 +1411,8 @@ var instrs={
   8:"Ungerade Nodes = ROT, gerade = BLAU. Jeder Druck verschiebt den Balken. Erste Farbe, die alle 8 LEDs fuellt, gewinnt!",
   9:"Manche Nodes sind Minen. Druecke Nodes frei: Gruen = sicher (+Punkt), Rot = Mine (-Leben). 3 Leben insgesamt. Alle sicheren Nodes finden = Sieg!",
   10:"Wie Reaktion, aber mit Elimination. Ein Node leuchtet gelb &ndash; 2s Gnadenfrist nach dem ersten Treffer. Wer nicht drueckt, verliert ein Leben. Letzter gewinnt!",
-  11:"Nodes zeigen kurz ihre zugewiesene Farbe. Dann: Node 1 blinkt die ZIELFARBE. Wer zuerst den passenden Node drueckt, bekommt einen Punkt. Meiste Punkte nach allen Runden gewinnt."
+  11:"Nodes zeigen kurz ihre zugewiesene Farbe. Dann: Node 1 blinkt die ZIELFARBE. Wer zuerst den passenden Node drueckt, bekommt einen Punkt. Meiste Punkte nach allen Runden gewinnt.",
+  12:"Nodes leuchten zufaellig gelb auf. Wer zuerst den leuchtenden Node drueckt, bekommt einen Punkt. Falscher Druck = kurz Rot. Nach allen Runden gewinnt der mit den meisten Treffern."
 };
 
 function modeChanged(){
@@ -1402,6 +1425,7 @@ function modeChanged(){
   document.getElementById('mineOpts').classList.toggle('hidden',m!==9);
   document.getElementById('knockOpts').classList.toggle('hidden',m!==10);
   document.getElementById('huntOpts').classList.toggle('hidden',m!==11);
+  document.getElementById('whamOpts').classList.toggle('hidden',m!==12);
   var instrEl=document.getElementById('instrText');
   if(instrs[m]){instrEl.innerHTML=instrs[m];document.getElementById('instrDetails').classList.remove('hidden');}
   else{document.getElementById('instrDetails').classList.add('hidden');}
@@ -1420,6 +1444,8 @@ function startGame(){
   if(m==='9') q+='&mines='+document.getElementById('mines').value;
   if(m==='10') q+='&klives='+document.getElementById('klives').value;
   if(m==='11') q+='&hrounds='+document.getElementById('hrounds').value;
+  if(m==='12') q+='&whamrounds='+document.getElementById('whamRounds').value;
+  q+='&history='+document.getElementById('historySize').value;
   post('/start',q);
 }
 function stopGame(){post('/stop','');}
@@ -1543,6 +1569,18 @@ function updateStatus(){
         tr2.innerHTML='<td'+cls+'>'+(i+1)+'</td><td>'+h.name+'</td><td style="font-weight:700">'+h.points+'</td><td>'+h.bestMs+'ms</td>';
         tb.appendChild(tr2);});
     }
+    var hc=document.getElementById('histCard');
+    if(d.history&&d.history.length>0){
+      hc.classList.remove('hidden');
+      var hb=document.getElementById('histTbody');hb.innerHTML='';
+      d.history.forEach(function(h,i){
+        var tr3=document.createElement('tr');
+        tr3.innerHTML='<td>'+(d.totalGames-i)+'</td>'
+          +'<td><span class="hist-mode">'+modeNames[h.mode]+'</span></td>'
+          +'<td style="font-weight:600">'+h.winner+'</td>'
+          +'<td>'+h.score+'</td>';
+        hb.appendChild(tr3);});
+    } else hc.classList.add('hidden');
   }).catch(function(){});
 }
 
@@ -1579,7 +1617,8 @@ void webHandleStatus() {
     case GAME_HOTPOTATO: scoreLabel="Leben";    break;
     case GAME_KINGHILL:  scoreLabel="Sekunden"; break;
     case GAME_KNOCKOUT:  scoreLabel="Leben";    break;
-    case GAME_COLORHUNT: scoreLabel="Punkte";   break;
+    case GAME_COLORHUNT:   scoreLabel="Punkte";  break;
+    case GAME_WHACKAMOLE:  scoreLabel="Treffer"; break;
   }
   j+=",\"scoreLabel\":\""+String(scoreLabel)+"\"";
   j+=",\"nodeList\":[";
@@ -1594,7 +1633,8 @@ void webHandleStatus() {
         v=hold/1000; break;
       }
       case GAME_KNOCKOUT:  v=knockLives[i];  break;
-      case GAME_COLORHUNT: v=huntScores[i];  break;
+      case GAME_COLORHUNT:  v=huntScores[i];  break;
+      case GAME_WHACKAMOLE: v=whamScores[i];  break;
     }
     j+="{\"id\":"+String(i)+",\"name\":\""+String(players[i].name)+"\",";
     j+="\"on\":"; j+=(nodes[i].active?"true":"false"); j+=",";
@@ -1643,7 +1683,18 @@ void webHandleStatus() {
     j+="{\"name\":\""+String(highScores[i].name)+"\",\"points\":"+String(highScores[i].points)+",\"bestMs\":"+String(highScores[i].bestMs)+"}";
     if (i<highScoreCount-1) j+=",";
   }
-  j+="]}";
+  j+="]";
+
+  j+=",\"history\":[";
+  uint8_t cap2 = (cfgMaxHistory < MAX_HISTORY) ? cfgMaxHistory : MAX_HISTORY;
+  uint8_t hc = (historyCount < cap2) ? historyCount : cap2;
+  for (int8_t i=(int8_t)hc-1; i>=0; i--) {
+    j+="{\"mode\":"+String(gameHistory[i].mode)+",\"winner\":\""+String(gameHistory[i].winner)+"\",\"score\":"+String(gameHistory[i].score)+"}";
+    if (i>0) j+=",";
+  }
+  j+="]";
+  j+=",\"totalGames\":"+String(totalGames);
+  j+="}";
 
   webServer.sendHeader("Access-Control-Allow-Origin","*");
   webServer.send(200,"application/json",j);
@@ -1660,6 +1711,8 @@ void webHandleStart() {
   if (webServer.hasArg("mines"))    cfgMines       = constrain(webServer.arg("mines").toInt(),1,nodeCount>1?nodeCount-1:1);
   if (webServer.hasArg("klives"))   cfgKnockLives  = constrain(webServer.arg("klives").toInt(),1,5);
   if (webServer.hasArg("hrounds"))  cfgHuntRounds  = constrain(webServer.arg("hrounds").toInt(),3,20);
+  if (webServer.hasArg("whamrounds")) cfgWhamRounds = constrain(webServer.arg("whamrounds").toInt(),5,30);
+  if (webServer.hasArg("history"))    cfgMaxHistory  = constrain(webServer.arg("history").toInt(),3,20);
   // duration used by king and tug too
   if (webServer.hasArg("duration")&&m==7) cfgDuration = constrain(webServer.arg("duration").toInt(),30,600);
   if (webServer.hasArg("duration")&&m==8) cfgDuration = constrain(webServer.arg("duration").toInt(),30,600);
@@ -1676,6 +1729,7 @@ void webHandleStart() {
   else if (m==GAME_MINESWEEPER) mineStart();
   else if (m==GAME_KNOCKOUT)   knockStart();
   else if (m==GAME_COLORHUNT)  huntStart();
+  else if (m==GAME_WHACKAMOLE)  whamStart();
   webServer.send(200,"text/plain","OK");
 }
 
@@ -1704,6 +1758,7 @@ void webHandleNames() {
 void webHandleClearScores() {
   highScoreCount=0;
   memset(highScores,0,sizeof(highScores));
+  historyCount=0; totalGames=0;
   webServer.send(200,"text/plain","OK");
 }
 
@@ -1724,6 +1779,7 @@ void handleSerial() {
   else if (c=='9') mineStart();
   else if (c=='k') knockStart();
   else if (c=='h') huntStart();
+  else if (c=='w') whamStart();
   else if (c=='0') { gameMode=GAME_IDLE; allLED(COL_OFF,ANIM_SOLID); Serial.println("Gestoppt."); }
   else if (c=='s') {
     Serial.printf("Modus:%u Nodes:%u\n",gameMode,nodeCount);
@@ -1762,7 +1818,7 @@ void setup() {
 
   Serial.println("Web: http://192.168.4.1");
   Serial.println("Seriell: 1=CTF 2=Memory 3=Bomb 4=Reaktion 5=Simon 6=HotPotato");
-  Serial.println("         7=KingHill 8=TugWar 9=Minesweeper k=Knockout h=ColorHunt");
+  Serial.println("         7=KingHill 8=TugWar 9=Minesweeper k=Knockout h=ColorHunt w=WhackaMole");
   Serial.println("         0=Stop s=Status");
 }
 
@@ -1792,4 +1848,5 @@ void loop() {
   // GAME_MINESWEEPER: event-driven, no timer update needed
   else if (gameMode==GAME_KNOCKOUT)   knockUpdate();
   else if (gameMode==GAME_COLORHUNT)  huntUpdate();
+  else if (gameMode==GAME_WHACKAMOLE)   whamUpdate();
 }
