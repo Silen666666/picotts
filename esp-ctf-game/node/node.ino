@@ -358,10 +358,14 @@ void loop() {
     sendPkt(PKT_PING, myId);
   }
 
-  // Button
-  if (myId != 0 && buttonPressed()) {
-    Serial.printf("[NODE] Button pressed (id=%u)\n", myId);
-    sendPkt(PKT_BUTTON, myId);
+  // Button – Druck IMMER melden (Diagnose), aber nur bei Registrierung senden
+  if (buttonPressed()) {
+    if (myId != 0) {
+      Serial.printf("[NODE] Button pressed (id=%u) -> gesendet\n", myId);
+      sendPkt(PKT_BUTTON, myId);
+    } else {
+      Serial.println("[NODE] Button erkannt, aber noch nicht registriert (myId=0)");
+    }
   }
 
   updateLed();

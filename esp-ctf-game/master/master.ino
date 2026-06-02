@@ -1396,7 +1396,7 @@ summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6p
 </div>
 
 <div class="card hidden" id="ctfScoreCard">
-  <h2>&#127987; Punktestand CTF</h2>
+  <h2>&#127987; CTF &ndash; Eroberte Nodes pro Team</h2>
   <div id="ctfScores"></div>
 </div>
 
@@ -1539,10 +1539,17 @@ function updateStatus(){
       for(var t=1;t<=4;t++){if(d.scores[t]===undefined)continue;
         var row=document.createElement('div');row.className='srow';
         var pct=mx>0?Math.round(d.scores[t]/mx*100):0;
+        var cnt=d.scores[t];
         row.innerHTML='<div class="sname" style="color:'+tc[t]+';min-width:60px">'+tn[t]+'</div>'
           +'<div class="bar-wrap"><div class="bar-fill" style="background:'+tc[t]+';width:'+pct+'%"></div></div>'
-          +'<div class="spts">'+d.scores[t]+'</div>';
+          +'<div class="spts">'+cnt+' Node'+(cnt==1?'':'s')+'</div>';
         sv.appendChild(row);}
+      if(d.neutral!==undefined&&d.neutral>0){
+        var nr=document.createElement('div');nr.className='srow';
+        nr.innerHTML='<div class="sname" style="color:#8b949e;min-width:60px">Neutral</div>'
+          +'<div class="bar-wrap"><div class="bar-fill" style="background:#8b949e;width:'+(mx>0?Math.round(d.neutral/mx*100):0)+'%"></div></div>'
+          +'<div class="spts">'+d.neutral+' Node'+(d.neutral==1?'':'s')+'</div>';
+        sv.appendChild(nr);}
     } else cs.classList.add('hidden');
 
     // Generischer Live-Spielstand (Memory, Kartoffel, King, Knockout, Farbjagd)
@@ -1689,6 +1696,8 @@ void webHandleStatus() {
       j+="\""+String(t)+"\":"+String(s); if(t<cfgTeams) j+=",";
     }
     j+="}";
+    uint8_t neu=0; for(uint8_t i=1;i<=nodeCount;i++) if(ctfTeam[i]==0) neu++;
+    j+=",\"neutral\":"+String(neu);
   }
   if (gameMode==GAME_REACTION) {
     j+=",\"round\":"+String(reactRound);
