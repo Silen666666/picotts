@@ -12,12 +12,16 @@
 #ifdef ESP32
   #include <WiFi.h>
   #include <WebServer.h>
+  #include <Update.h>
   WebServer webServer(80);
 #else
   #include <ESP8266WiFi.h>
   #include <ESP8266WebServer.h>
+  #include <ESP8266HTTPUpdateServer.h>
   ESP8266WebServer webServer(80);
+  ESP8266HTTPUpdateServer httpUpdater;
 #endif
+#include <ArduinoOTA.h>
 #include <WiFiUdp.h>
 
 #include "config.h"
@@ -1398,6 +1402,7 @@ summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6p
   <button class="btn btn-start" onclick="startGame()">&#9654; STARTEN</button>
   <button class="btn btn-stop" onclick="stopGame()">&#9632; STOPPEN</button>
   <button class="btn btn-reset" onclick="resetNodes()">&#128260; NODES RECONNECT</button>
+  <a href="/update" class="btn" style="background:#0f3460;color:#a8dadc;text-decoration:none;text-align:center">&#128640; OTA Update</a>
 </div>
 
 <div class="card hidden" id="reactLiveCard">
@@ -1874,6 +1879,55 @@ void handleSerial() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// OTA-Update (Master) via Browser – http://192.168.4.1/update
+// ─────────────────────────────────────────────────────────────
+#ifdef ESP32
+void webHandleUpdateForm() {
+  webServer.send(200, "text/html",
+    "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+    "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+    "<title>OTA Update</title>"
+    "<style>body{font-family:sans-serif;background:#0d1117;color:#c9d1d9;display:flex;"
+    "flex-direction:column;align-items:center;padding:30px}"
+    "h2{color:#a8dadc}form{display:flex;flex-direction:column;gap:12px;width:100%;max-width:400px}"
+    "input[type=file]{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:8px;color:#c9d1d9}"
+    "button{background:#238636;color:#fff;border:none;border-radius:8px;padding:12px;font-size:1rem;cursor:pointer}"
+    "a{color:#a8dadc;font-size:.9rem}</style></head><body>"
+    "<h2>&#128640; Master OTA-Update</h2>"
+    "<form method='POST' action='/update' enctype='multipart/form-data'>"
+    "<input type='file' name='firmware' accept='.bin' required>"
+    "<button type='submit'>Firmware hochladen</button>"
+    "</form><br><a href='/'>&#8592; Zurueck</a></body></html>");
+}
+
+void webHandleUpdateUpload() {
+  HTTPUpload& upload = webServer.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    Serial.printf("[OTA] Start: %s\n", upload.filename.c_str());
+    if (!Update.begin()) Update.printError(Serial);
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize)
+      Update.printError(Serial);
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (Update.end(true)) Serial.printf("[OTA] Fertig: %u Bytes\n", upload.totalSize);
+    else Update.printError(Serial);
+  }
+}
+
+void webHandleUpdateResult() {
+  bool ok = !Update.hasError();
+  webServer.send(200, "text/html",
+    String("<!DOCTYPE html><html><head><meta charset='utf-8'>"
+    "<meta http-equiv='refresh' content='8;url=/'>"
+    "<title>OTA</title><style>body{font-family:sans-serif;background:#0d1117;color:#c9d1d9;"
+    "display:flex;flex-direction:column;align-items:center;padding:40px}</style></head><body>")
+    + (ok ? "<h2>&#9989; Update erfolgreich! Neustart...</h2>" : "<h2>&#10060; Update fehlgeschlagen!</h2>")
+    + "</body></html>");
+  if (ok) { delay(500); ESP.restart(); }
+}
+#endif
+
+// ─────────────────────────────────────────────────────────────
 // setup / loop
 // ─────────────────────────────────────────────────────────────
 void setup() {
@@ -1895,15 +1949,30 @@ void setup() {
   webServer.on("/names",  HTTP_POST, webHandleNames);
   webServer.on("/clearscores", HTTP_POST, webHandleClearScores);
   webServer.on("/reset",       HTTP_POST, webHandleReset);
+#ifdef ESP32
+  webServer.on("/update", HTTP_GET,  webHandleUpdateForm);
+  webServer.on("/update", HTTP_POST, webHandleUpdateResult, webHandleUpdateUpload);
+#else
+  httpUpdater.setup(&webServer, "/update");
+#endif
   webServer.begin();
 
+  // ArduinoOTA (fuer Flashen via Arduino IDE Netzwerk-Port)
+  ArduinoOTA.setHostname("ctf-master");
+  ArduinoOTA.onStart([]()  { Serial.println("[OTA] Start");  });
+  ArduinoOTA.onEnd([]()    { Serial.println("[OTA] Fertig"); });
+  ArduinoOTA.onError([](ota_error_t e) { Serial.printf("[OTA] Fehler %u\n", e); });
+  ArduinoOTA.begin();
+
   Serial.println("Web: http://192.168.4.1");
+  Serial.println("OTA: http://192.168.4.1/update  (Firmware .bin hochladen)");
   Serial.println("Seriell: 1=CTF 2=Memory 3=Bomb 4=Reaktion 5=Simon 6=HotPotato");
   Serial.println("         7=KingHill 8=TugWar 9=Minesweeper k=Knockout h=ColorHunt w=WhackaMole");
   Serial.println("         0=Stop s=Status r=Reset/Reconnect");
 }
 
 void loop() {
+  ArduinoOTA.handle();
   webServer.handleClient();
   handleUDP();
   handleSerial();

@@ -20,6 +20,7 @@
   #include <ESP8266WiFi.h>
 #endif
 #include <WiFiUdp.h>
+#include <ArduinoOTA.h>
 
 #ifdef LED_NEOPIXEL
   #include <Adafruit_NeoPixel.h>
@@ -327,6 +328,37 @@ void setup() {
 
   connectWiFi();
 
+  // ArduinoOTA – Hostname aus letzten 3 MAC-Bytes, z.B. "ctf-node-a1b2c3"
+  {
+    uint64_t mac = ESP.getEfuseMac();
+    char hostname[20];
+    snprintf(hostname, sizeof(hostname), "ctf-node-%02x%02x%02x",
+             (uint8_t)(mac>>16), (uint8_t)(mac>>8), (uint8_t)mac);
+    ArduinoOTA.setHostname(hostname);
+    Serial.printf("[OTA] Hostname: %s\n", hostname);
+  }
+  ArduinoOTA.onStart([]() {
+    setLed(COL_PURPLE, ANIM_BLINK_FAST);
+    Serial.println("[OTA] Start");
+  });
+  ArduinoOTA.onEnd([]() {
+    setLed(COL_GREEN, ANIM_SOLID);
+    Serial.println("[OTA] Fertig – Neustart");
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+#ifdef LED_NEOPIXEL
+    uint8_t lit = (uint8_t)((uint32_t)progress * NEO_COUNT / total);
+    for (int i = 0; i < NEO_COUNT; i++)
+      strip.setPixelColor(i, i < lit ? 0x800080 : 0x100010);
+    strip.show();
+#endif
+  });
+  ArduinoOTA.onError([](ota_error_t e) {
+    setLed(COL_RED, ANIM_BLINK_FAST);
+    Serial.printf("[OTA] Fehler %u\n", e);
+  });
+  ArduinoOTA.begin();
+
   // Zufaelliges Jitter 0-2s damit Nodes nicht gleichzeitig registrieren
   randomSeed(ESP.getEfuseMac() ^ millis());
   delay(random(0, 2000));
@@ -349,6 +381,7 @@ void loop() {
     return;  // nach reconnect sofort neu starten (frischer Zustand)
   }
 
+  ArduinoOTA.handle();
   handleUDP();
 
   // Registration (until acknowledged)
