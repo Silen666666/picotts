@@ -33,6 +33,7 @@
 struct NodeInfo { IPAddress ip; bool active; uint32_t lastSeen; };
 NodeInfo nodes[MAX_NODES + 1];
 uint8_t  nodeCount = 0;
+uint8_t  nodeColor[MAX_NODES + 1] = {0};  // letzte Farbe je Node (fuer Blink->Solid nach Spielende)
 
 WiFiUDP   udp;
 IPAddress bcastIP(192, 168, 4, 255);
@@ -209,8 +210,21 @@ void gameOverBlink(uint8_t color, uint8_t anim = ANIM_BLINK_FAST) {
   idleBlinkUntil = millis() + 10000UL;
 }
 
+// Spielende mit Gewinner-Hervorhebung: Gewinner blinkt, Verlierer solid.
+// Nach 10s stoppt das Blinken automatisch (Nodes leuchten solid weiter).
+void finishGame(uint8_t winnerId, uint8_t winColor, uint8_t loserColor) {
+  for (uint8_t i=1;i<=nodeCount;i++) {
+    if (!nodes[i].active) continue;
+    if (i==winnerId) setLED(i, winColor, ANIM_BLINK_FAST);
+    else             setLED(i, loserColor, ANIM_SOLID);
+  }
+  idleBlinkUntil = millis() + 10000UL;
+  gameMode = GAME_IDLE;
+}
+
 void setLED(uint8_t id, uint8_t color, uint8_t anim) {
   if (id<1||id>nodeCount||!nodes[id].active) return;
+  nodeColor[id] = color;
   sendPkt(nodes[id].ip, PKT_SET_LED, id, color, anim);
 }
 
@@ -323,7 +337,7 @@ static const uint8_t SEQ_COLORS[] = {COL_RED,COL_BLUE,COL_GREEN,COL_YELLOW,COL_P
 
 void bombShowSequence() {
   for (uint8_t s=0;s<bombSeqLen;s++) {
-    setLED(bombSeq[s],SEQ_COLORS[s%8],ANIM_SOLID); delay(BOMB_STEP_MS);
+    setLED(bombSeq[s],SEQ_COLORS[s%8],ANIM_SOLID); yieldDelay(BOMB_STEP_MS);
     setLED(bombSeq[s],COL_OFF,ANIM_SOLID); yieldDelay(200);
   }
 }
@@ -410,10 +424,7 @@ void reactStartRound() {
       Serial.printf("  %s: %u Pkt  Best: %ums\n", players[i].name, players[i].points, players[i].bestMs);
     for (uint8_t i=1;i<=nodeCount;i++) reactInsertHighScore(i);
     addHistory(GAME_REACTION, players[winner].name, players[winner].points);
-    allLED(COL_OFF, ANIM_SOLID); yieldDelay(200);
-    setLED(winner, COL_GREEN, ANIM_BLINK_FAST);
-    for (uint8_t i=1;i<=nodeCount;i++) if(i!=winner) setLED(i,COL_RED,ANIM_SOLID);
-    gameMode = GAME_IDLE;
+    finishGame(winner, COL_GREEN, COL_RED);
     return;
   }
   uint8_t tries=0;
@@ -646,11 +657,12 @@ void potatoUpdate() {
     potatoCountActive();
     if (potatoActiveCnt <= 1) {
       // Find winner
-      for (uint8_t i=1;i<=nodeCount;i++) {
-        if (potatoActive[i]) { setLED(i, COL_GREEN, ANIM_BLINK_FAST); break; }
-      }
+      uint8_t pWinner = 0;
+      for (uint8_t i=1;i<=nodeCount;i++) if (potatoActive[i]) { pWinner=i; break; }
       Serial.println("[POTATO] Spiel beendet!");
-      gameMode = GAME_IDLE;
+      if (pWinner>0) addHistory(GAME_HOTPOTATO, players[pWinner].name, potatoLives[pWinner]);
+      else           addHistory(GAME_HOTPOTATO, "Niemand", 0);
+      finishGame(pWinner, COL_GREEN, COL_OFF);
       return;
     }
   } else {
@@ -748,9 +760,7 @@ void kingUpdate() {
     Serial.printf("[KING] Spiel beendet! Gewinner: Node %u (%s) mit %ums\n",
       winner, players[winner].name, kingHoldTime[winner]);
     addHistory(GAME_KINGHILL, players[winner].name, kingHoldTime[winner]/1000);
-    allLED(COL_OFF, ANIM_SOLID);
-    setLED(winner, COL_YELLOW, ANIM_BLINK_FAST);
-    gameMode = GAME_IDLE;
+    finishGame(winner, COL_YELLOW, COL_OFF);
   }
 }
 
@@ -1001,18 +1011,17 @@ void knockUpdate() {
       knockCountRemaining();
       knockGraceAt = 0;
       if (knockRemaining <= 1) {
-        // Find winner
         uint8_t knockWinner = 0;
-        for (uint8_t i=1;i<=nodeCount;i++) {
-          if (knockActive[i]) { knockWinner=i; setLED(i, COL_GREEN, ANIM_BLINK_FAST); break; }
-        }
-        if (knockRemaining == 0) gameOverBlink(COL_WHITE, ANIM_BLINK_SLOW); // draw
+        for (uint8_t i=1;i<=nodeCount;i++) if (knockActive[i]) { knockWinner=i; break; }
         Serial.println("[KNOCK] Spiel beendet!");
-        if (knockRemaining == 1 && knockWinner > 0)
+        if (knockRemaining == 1 && knockWinner > 0) {
           addHistory(GAME_KNOCKOUT, players[knockWinner].name, knockRound);
-        else
+          finishGame(knockWinner, COL_GREEN, COL_OFF);
+        } else {
           addHistory(GAME_KNOCKOUT, "Unentschieden", knockRound);
-        gameMode = GAME_IDLE;
+          gameOverBlink(COL_WHITE, ANIM_BLINK_SLOW); // draw
+          gameMode = GAME_IDLE;
+        }
         return;
       }
       knockNextAt = now + random(REACT_DELAY_MIN_MS, REACT_DELAY_MAX_MS);
@@ -1042,9 +1051,7 @@ void huntStartRound() {
     for (uint8_t i=1;i<=nodeCount;i++)
       Serial.printf("  Node %u (%s): %u Pkt\n", i, players[i].name, huntScores[i]);
     addHistory(GAME_COLORHUNT, players[winner].name, huntScores[winner]);
-    allLED(COL_OFF, ANIM_SOLID);
-    setLED(winner, COL_GREEN, ANIM_BLINK_FAST);
-    gameMode = GAME_IDLE;
+    finishGame(winner, COL_GREEN, COL_OFF);
     return;
   }
 
@@ -1145,11 +1152,8 @@ void whamStartRound() {
     Serial.println("[WHAM] === ENDE ===");
     for (uint8_t i=1;i<=nodeCount;i++)
       Serial.printf("  %s: %u Treffer\n", players[i].name, whamScores[i]);
-    allLED(COL_OFF, ANIM_SOLID); yieldDelay(200);
-    setLED(winner, COL_GREEN, ANIM_BLINK_FAST);
-    for (uint8_t i=1;i<=nodeCount;i++) if(i!=winner) setLED(i,COL_RED,ANIM_SOLID);
     addHistory(GAME_WHACKAMOLE, players[winner].name, whamScores[winner]);
-    gameMode = GAME_IDLE;
+    finishGame(winner, COL_GREEN, COL_RED);
     return;
   }
   uint8_t tries=0;
@@ -1808,7 +1812,7 @@ void webHandleStart() {
   if (webServer.hasArg("duration")&&m==7) cfgDuration = constrain(webServer.arg("duration").toInt(),30,600);
   if (webServer.hasArg("duration")&&m==8) cfgDuration = constrain(webServer.arg("duration").toInt(),30,600);
 
-  gameMode=GAME_IDLE; allLED(COL_OFF,ANIM_SOLID); yieldDelay(100);
+  gameMode=GAME_IDLE; idleBlinkUntil=0; allLED(COL_OFF,ANIM_SOLID); yieldDelay(100);
   if      (m==GAME_CTF)        ctfStart();
   else if (m==GAME_MEMORY)     memStart();
   else if (m==GAME_BOMB)       bombStart();
@@ -1825,12 +1829,12 @@ void webHandleStart() {
 }
 
 void webHandleStop() {
-  gameMode=GAME_IDLE; allLED(COL_OFF,ANIM_SOLID);
+  gameMode=GAME_IDLE; idleBlinkUntil=0; allLED(COL_OFF,ANIM_SOLID);
   webServer.send(200,"text/plain","OK");
 }
 
 void resetNodes() {
-  gameMode = GAME_IDLE;
+  gameMode = GAME_IDLE; idleBlinkUntil = 0;
   // Broadcast PKT_RESET so connected nodes clear their ID
   Packet p; p.type=PKT_RESET; p.nodeId=0xFF;
   memset(p.data,0,sizeof(p.data));
@@ -1894,7 +1898,7 @@ void handleSerial() {
   else if (c=='k') knockStart();
   else if (c=='h') huntStart();
   else if (c=='w') whamStart();
-  else if (c=='0') { gameMode=GAME_IDLE; allLED(COL_OFF,ANIM_SOLID); Serial.println("Gestoppt."); }
+  else if (c=='0') { gameMode=GAME_IDLE; idleBlinkUntil=0; allLED(COL_OFF,ANIM_SOLID); Serial.println("Gestoppt."); }
   else if (c=='r') { resetNodes(); }
   else if (c=='s') {
     Serial.printf("Modus:%u Nodes:%u\n",gameMode,nodeCount);
@@ -2017,11 +2021,12 @@ void loop() {
     }
   }
 
-  // Nach Spielende: Blinken nach 10s stoppen -> alle Nodes aus
+  // Nach Spielende: Blinken nach 10s stoppen -> Nodes leuchten solid in ihrer Farbe
   if (idleBlinkUntil != 0 && millis() > idleBlinkUntil) {
     idleBlinkUntil = 0;
-    allLED(COL_OFF, ANIM_SOLID);
-    Serial.println("[IDLE] Blinken gestoppt.");
+    for (uint8_t i=1;i<=nodeCount;i++)
+      if (nodes[i].active) sendPkt(nodes[i].ip, PKT_SET_LED, i, nodeColor[i], ANIM_SOLID);
+    Serial.println("[IDLE] Blinken gestoppt - Nodes leuchten solid.");
   }
 
   if      (gameMode==GAME_CTF)        ctfUpdate();
