@@ -1234,8 +1234,8 @@ void handleUDP() {
         if (nodes[i].ip==remoteIP) {
           nodes[i].active   = true;
           nodes[i].lastSeen = millis();
-          delay(random(0,30));  // kurzes Jitter damit ACKs sich nicht überschneiden
           sendPkt(remoteIP,PKT_ACK,i,i);
+          delay(5); sendPkt(remoteIP,PKT_ACK,i,i);  // doppelt gegen Paketverlust
           Serial.printf("[REG] Node %u re-registriert (%s)\n",i,remoteIP.toString().c_str());
           return;
         }
@@ -1246,19 +1246,27 @@ void handleUDP() {
       nodes[nodeCount].active   = true;
       nodes[nodeCount].lastSeen = millis();
       if (players[nodeCount].name[0]==0) snprintf(players[nodeCount].name,20,"Spieler %u",nodeCount);
-      delay(random(0,30));  // Jitter gegen gleichzeitige ACK-Kollision
       sendPkt(remoteIP,PKT_ACK,nodeCount,nodeCount);
+      delay(5); sendPkt(remoteIP,PKT_ACK,nodeCount,nodeCount);  // doppelt
       Serial.printf("[REG] Node %u neu (%s)\n",nodeCount,remoteIP.toString().c_str());
       break;
 
     case PKT_PING:
-      if (p.nodeId>=1&&p.nodeId<=nodeCount) nodes[p.nodeId].lastSeen=millis();
+      // Bekannte ID mit passender IP? -> lebendig markieren.
+      // Sonst (z.B. nach Master-Neustart): Node zum sauberen Reconnect zwingen.
+      if (p.nodeId>=1 && p.nodeId<=nodeCount && nodes[p.nodeId].ip==remoteIP) {
+        nodes[p.nodeId].active = true;
+        nodes[p.nodeId].lastSeen = millis();
+      } else {
+        sendPkt(remoteIP, PKT_RESET, 0xFF);  // unbekannt -> re-registrieren
+      }
       break;
 
     case PKT_BUTTON: {
       uint8_t id=p.nodeId;
-      if (id<1||id>nodeCount) return;
+      if (id<1||id>nodeCount||nodes[id].ip!=remoteIP) { sendPkt(remoteIP,PKT_RESET,0xFF); return; }
       nodes[id].lastSeen=millis();
+      nodes[id].active=true;
       Serial.printf("[BTN] Node %u\n",id);
       if      (gameMode==GAME_CTF)         ctfOnButton(id);
       else if (gameMode==GAME_MEMORY)      memOnButton(id);
@@ -1972,6 +1980,11 @@ void setup() {
   WiFi.mode(WIFI_AP);
   // Max 10 Verbindungen (ESP32-Default ist 4, reicht nicht fuer mehrere Nodes)
   WiFi.softAP(WIFI_SSID, strlen(WIFI_PASS)>0 ? WIFI_PASS : nullptr, 1, 0, 10);
+#ifdef ESP32
+  WiFi.setSleep(false);   // AP-Stromsparen aus -> keine verpassten Pakete
+#else
+  WiFi.setSleepMode(WIFI_NONE_SLEEP);
+#endif
   Serial.printf("AP: %s  IP: %s  maxConn:10\n", WIFI_SSID, WiFi.softAPIP().toString().c_str());
 
   udp.begin(UDP_PORT);

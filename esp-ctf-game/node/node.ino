@@ -275,6 +275,14 @@ void handleUDP() {
 void connectWiFi() {
   Serial.printf("\nConnecting to '%s'", WIFI_SSID);
   WiFi.mode(WIFI_STA);
+  // WLAN-Stromsparmodus AUS – verhindert verpasste UDP-Pakete (Hauptursache fuer
+  // "Node reagiert nicht"). Ohne dies schlaeft der Funkchip periodisch ein.
+#ifdef ESP32
+  WiFi.setSleep(false);
+#else
+  WiFi.setSleepMode(WIFI_NONE_SLEEP);
+#endif
+  WiFi.setAutoReconnect(true);
   if (strlen(WIFI_PASS) > 0) WiFi.begin(WIFI_SSID, WIFI_PASS);
   else WiFi.begin(WIFI_SSID);
 
@@ -368,26 +376,40 @@ void setup() {
 }
 
 void loop() {
-  // Reconnect if WiFi dropped – reset ID so node re-registers after reconnect
+  // WLAN-Status pruefen – kurze Aussetzer (Blips) tolerieren, NICHT sofort
+  // die Registrierung wegwerfen. Erst nach 3s echtem Verlust neu verbinden.
+  static uint32_t wifiLostSince = 0;
   if (WiFi.status() != WL_CONNECTED) {
-    if (myId != 0) {
-      Serial.println("[WARN] WiFi lost – ID zurueckgesetzt, warte auf Neuregistrierung");
-      myId = 0;
-      lastRegister = 0;
-      lastPing     = 0;
-      setLed(COL_YELLOW, ANIM_BLINK_FAST);  // gelb schnell = WLAN-Verlust
+    if (wifiLostSince == 0) wifiLostSince = millis();
+    if (millis() - wifiLostSince < 3000) {
+      // Innerhalb Toleranz: WLAN reconnectet automatisch im Hintergrund.
+      // myId behalten (Master kennt uns noch fuer 15s).
+      updateLed();
+      yield();
+      return;
     }
+    // Echter Verlust > 3s
+    if (myId != 0) {
+      Serial.println("[WARN] WiFi laenger weg – ID zurueckgesetzt");
+      myId = 0; lastRegister = 0; lastPing = 0;
+    }
+    setLed(COL_YELLOW, ANIM_BLINK_FAST);
     connectWiFi();
-    return;  // nach reconnect sofort neu starten (frischer Zustand)
+    wifiLostSince = 0;
+    return;
   }
+  wifiLostSince = 0;  // WLAN ok
 
   ArduinoOTA.handle();
   handleUDP();
 
-  // Registration (until acknowledged)
-  if (myId == 0 && millis() - lastRegister >= REGISTER_RETRY_MS) {
+  // Registration (until acknowledged) – aggressiver wenn unregistriert
+  uint32_t regRetry = (myId == 0) ? 1000UL : REGISTER_RETRY_MS;
+  if (myId == 0 && millis() - lastRegister >= regRetry) {
     lastRegister = millis();
     sendPkt(PKT_REGISTER, 0);
+    delayMicroseconds(500);
+    sendPkt(PKT_REGISTER, 0);  // doppelt gegen Paketverlust
     Serial.println("[NODE] Registering...");
   }
 
