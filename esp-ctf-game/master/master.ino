@@ -482,7 +482,7 @@ void reactUpdate() {
   } else if (now-reactLitAt > REACT_TIMEOUT_MS) {
     reactRoundDone=true;
     Serial.println("[REACT] Timeout – niemand gedrückt");
-    gameOverBlink(COL_ORANGE, ANIM_BLINK_SLOW);
+    allLED(COL_ORANGE, ANIM_BLINK_SLOW);  // zeige Timeout ohne den Spielende-Timer zu setzen
     reactNextAt = now + 1500;
   }
 }
@@ -1120,10 +1120,9 @@ void huntOnButton(uint8_t id) {
     huntTarget = newTarget;
     huntNextAt = millis() + 1500;
   } else if (id != 1) {
-    // Wrong – flash red briefly
+    // Wrong – flash red briefly; don't touch huntNextAt so Node 1 keeps blinking the target
     setLED(id, COL_RED, ANIM_BLINK_FAST);
     Serial.printf("[HUNT] Node %u falsch!\n", id);
-    huntNextAt = millis() + 200; // small delay re-allow same round
   }
 }
 

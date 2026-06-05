@@ -336,12 +336,16 @@ void setup() {
 
   connectWiFi();
 
-  // ArduinoOTA – Hostname aus letzten 3 MAC-Bytes, z.B. "ctf-node-a1b2c3"
+  // ArduinoOTA – Hostname aus letzten 3 MAC-Bytes / ChipID
   {
-    uint64_t mac = ESP.getEfuseMac();
     char hostname[20];
+#ifdef ESP32
+    uint64_t mac = ESP.getEfuseMac();
     snprintf(hostname, sizeof(hostname), "ctf-node-%02x%02x%02x",
              (uint8_t)(mac>>16), (uint8_t)(mac>>8), (uint8_t)mac);
+#else
+    snprintf(hostname, sizeof(hostname), "ctf-node-%06x", ESP.getChipId() & 0xFFFFFF);
+#endif
     ArduinoOTA.setHostname(hostname);
     Serial.printf("[OTA] Hostname: %s\n", hostname);
   }
@@ -368,7 +372,11 @@ void setup() {
   ArduinoOTA.begin();
 
   // Zufaelliges Jitter 0-2s damit Nodes nicht gleichzeitig registrieren
-  randomSeed(ESP.getEfuseMac() ^ millis());
+#ifdef ESP32
+  randomSeed((uint32_t)(ESP.getEfuseMac() >> 8) ^ millis());
+#else
+  randomSeed(ESP.getChipId() ^ millis());
+#endif
   delay(random(0, 2000));
 
   // Register with master
