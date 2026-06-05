@@ -182,24 +182,33 @@ void sendPkt(IPAddress ip, uint8_t type, uint8_t nid,
   udp.endPacket();
 }
 
-// Nicht-blockierendes delay: verarbeitet Pings/Webserver waehrend gewartet wird
+// Nicht-blockierendes delay: verarbeitet Pings/Webserver waehrend gewartet wird.
+// Wichtig: GESAMTEN Puffer leeren (while), nicht nur 1 Paket – sonst Rueckstau.
 void yieldDelay(uint32_t ms) {
   uint32_t start = millis();
   while (millis() - start < ms) {
     ArduinoOTA.handle();
     webServer.handleClient();
-    // Nur Ping/Register verarbeiten – keine Button-Events waehrend Sequenzen
-    int sz = udp.parsePacket();
-    if (sz >= (int)sizeof(Packet)) {
+    int sz;
+    while ((sz = udp.parsePacket()) >= (int)sizeof(Packet)) {
       Packet p; udp.read((uint8_t*)&p, sizeof(p));
       IPAddress rem = udp.remoteIP();
-      if (p.type == PKT_PING && p.nodeId >= 1 && p.nodeId <= nodeCount)
+      if (p.type == PKT_PING && p.nodeId >= 1 && p.nodeId <= nodeCount) {
         nodes[p.nodeId].lastSeen = millis();
-      else if (p.type == PKT_REGISTER) {
+        nodes[p.nodeId].active   = true;   // wichtig: auch active setzen, nicht nur lastSeen
+      } else if (p.type == PKT_REGISTER) {
         for (uint8_t i=1;i<=nodeCount;i++) {
-          if (nodes[i].ip==rem) { nodes[i].active=true; nodes[i].lastSeen=millis(); sendPkt(rem,PKT_ACK,i,i); break; }
+          if (nodes[i].ip==rem) {
+            nodes[i].active=true; nodes[i].lastSeen=millis();
+            sendPkt(rem,PKT_ACK,i,i);
+            sendPkt(rem,PKT_ACK,i,i);
+            break;
+          }
         }
       }
+      // Button-Pakete waehrend Animationen werden verworfen (verhindert Re-Entranz
+      // in Spielfunktionen wie bombShowSequence/simonUpdate). Die Node sendet
+      // ohnehin 3x – ein Paket kommt sicher vor oder nach der Animation an.
     }
     yield();
   }

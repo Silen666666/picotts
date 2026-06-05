@@ -79,8 +79,9 @@ struct LedState {
   bool     flashDone;
   uint8_t  barCount;    // for ANIM_BAR / ANIM_SPLIT: number of leading LEDs
   uint8_t  barBg;       // for ANIM_BAR: background color index (trailing LEDs)
+  bool     dirty;       // render needed – prevents calling strip.show() every loop
 };
-LedState led = {COL_OFF, ANIM_SOLID, 0, 0, false, 0, COL_OFF};
+LedState led = {COL_OFF, ANIM_SOLID, 0, 0, false, 0, COL_OFF, true};
 
 void setLed(uint8_t colorIdx, uint8_t anim) {
   led.colorIdx   = (colorIdx < NUM_COLORS) ? colorIdx : 0;
@@ -88,35 +89,46 @@ void setLed(uint8_t colorIdx, uint8_t anim) {
   led.lastChange = millis();
   led.phase      = 0;
   led.flashDone  = false;
+  led.dirty      = true;
 }
 
+// strip.show() deaktiviert Interrupts fuer ~300µs pro Aufruf. Ohne Throttle
+// wird es tausende Male/s aufgerufen -> ESP32 WiFi-Stack kann keine Pakete
+// empfangen -> Nodes "haengen" oder verlieren die Verbindung.
+// Jetzt wird nur noch gerendert wenn sich der Zustand wirklich aendert.
 void updateLed() {
-  uint32_t color = COLORS[led.colorIdx];
   uint32_t now   = millis();
+  uint32_t color = COLORS[led.colorIdx];
 
   switch (led.anim) {
     case ANIM_SOLID:
+      if (!led.dirty) return;
       applyColor(color);
+      led.dirty = false;
       break;
 
     case ANIM_BLINK_SLOW:
       if (now - led.lastChange >= 500) {
-        led.phase ^= 1;
-        led.lastChange = now;
+        led.phase ^= 1; led.lastChange = now; led.dirty = true;
       }
+      if (!led.dirty) return;
       applyColor(led.phase ? color : 0);
+      led.dirty = false;
       break;
 
     case ANIM_BLINK_FAST:
       if (now - led.lastChange >= 125) {
-        led.phase ^= 1;
-        led.lastChange = now;
+        led.phase ^= 1; led.lastChange = now; led.dirty = true;
       }
+      if (!led.dirty) return;
       applyColor(led.phase ? color : 0);
+      led.dirty = false;
       break;
 
     case ANIM_PULSE: {
-      // Sine-approximated breathing, period ~2s
+      // 30fps – haeufiger ist fuer das Auge nicht sichtbar aber kostet WiFi-Zeit
+      if (now - led.lastChange < 33) return;
+      led.lastChange = now;
       uint32_t t   = (now % 2000);
       uint8_t  val = (t < 1000) ? (t / 4) : (255 - ((t - 1000) / 4));
       uint8_t  r   = ((color >> 16) & 0xFF) * val / 255;
@@ -129,20 +141,23 @@ void updateLed() {
     case ANIM_FLASH:
       if (!led.flashDone) {
         if (led.phase == 0) {
-          applyColor(0xFFFFFF);         // brief white flash
-          if (now - led.lastChange >= 80) { led.phase = 1; led.lastChange = now; }
+          if (led.dirty) { applyColor(0xFFFFFF); led.dirty = false; }
+          if (now - led.lastChange >= 80) { led.phase = 1; led.lastChange = now; led.dirty = true; }
         } else if (led.phase == 1) {
-          applyColor(0);
-          if (now - led.lastChange >= 60) { led.phase = 2; led.lastChange = now; }
+          if (led.dirty) { applyColor(0); led.dirty = false; }
+          if (now - led.lastChange >= 60) { led.phase = 2; led.lastChange = now; led.dirty = true; }
         } else {
-          led.flashDone = true;         // fall through to solid
+          led.flashDone = true; led.dirty = true;
         }
       } else {
+        if (!led.dirty) return;
         applyColor(color);
+        led.dirty = false;
       }
       break;
 
     case ANIM_BAR:
+      if (!led.dirty) return;
 #ifdef LED_NEOPIXEL
       for (int i = 0; i < NEO_COUNT; i++) {
         uint32_t c = (i < led.barCount) ? COLORS[led.colorIdx] : COLORS[led.barBg];
@@ -152,9 +167,11 @@ void updateLed() {
 #else
       applyColor((led.barCount > 0) ? color : COLORS[led.barBg]);
 #endif
+      led.dirty = false;
       break;
 
     case ANIM_SPLIT:
+      if (!led.dirty) return;
 #ifdef LED_NEOPIXEL
       for (int i = 0; i < NEO_COUNT; i++) {
         uint32_t c = (i < led.barCount) ? COLORS[led.colorIdx] : COLORS[led.barBg];
@@ -164,6 +181,7 @@ void updateLed() {
 #else
       applyColor((led.barCount >= 4) ? color : COLORS[led.barBg]);
 #endif
+      led.dirty = false;
       break;
   }
 }
@@ -242,6 +260,7 @@ void handleUDP() {
         led.anim     = ANIM_BAR;
         led.barCount = (p.data[1] < NEO_COUNT) ? p.data[1] : NEO_COUNT;
         led.barBg    = p.data[2];
+        led.dirty    = true;
       }
       break;
 
@@ -251,6 +270,7 @@ void handleUDP() {
         led.anim     = ANIM_SPLIT;
         led.barCount = (p.data[1] < NEO_COUNT) ? p.data[1] : NEO_COUNT;
         led.barBg    = p.data[2];
+        led.dirty    = true;
       }
       break;
 
@@ -442,8 +462,10 @@ void loop() {
       if (pressSeq == 0) pressSeq = 1;   // 0 ist Sync-Reset reserviert
       Serial.printf("[NODE] Button pressed (id=%u seq=%u) -> gesendet\n", myId, pressSeq);
       sendPkt(PKT_BUTTON, myId, pressSeq);
-      delayMicroseconds(500);
+      delay(1);
       sendPkt(PKT_BUTTON, myId, pressSeq);
+      delay(2);
+      sendPkt(PKT_BUTTON, myId, pressSeq);  // 3x mit Zeitversatz fuer max. Zuverlaessigkeit
     } else {
       Serial.println("[NODE] Button erkannt, aber noch nicht registriert (myId=0)");
     }
