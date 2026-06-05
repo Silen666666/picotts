@@ -34,6 +34,7 @@ struct NodeInfo { IPAddress ip; bool active; uint32_t lastSeen; };
 NodeInfo nodes[MAX_NODES + 1];
 uint8_t  nodeCount = 0;
 uint8_t  nodeColor[MAX_NODES + 1] = {0};  // letzte Farbe je Node (fuer Blink->Solid nach Spielende)
+uint8_t  lastBtnSeq[MAX_NODES + 1] = {0}; // letzte Tasten-Sequenznr je Node (Dedup doppelter Pakete)
 
 WiFiUDP   udp;
 IPAddress bcastIP(192, 168, 4, 255);
@@ -1221,65 +1222,78 @@ void whamUpdate() {
 // UDP empfangen
 // ─────────────────────────────────────────────────────────────
 void handleUDP() {
-  int size=udp.parsePacket();
-  if (size<(int)sizeof(Packet)) return;
-  Packet p; udp.read((uint8_t*)&p,sizeof(p));
-  IPAddress remoteIP=udp.remoteIP();
+  // GESAMTEN Empfangspuffer leeren (nicht nur 1 Paket pro Loop) – verhindert
+  // Rueckstau und damit mehrsekuendige Verzoegerungen bei vielen Nodes.
+  int size;
+  while ((size = udp.parsePacket()) >= (int)sizeof(Packet)) {
+    Packet p; udp.read((uint8_t*)&p,sizeof(p));
+    IPAddress remoteIP=udp.remoteIP();
 
-  switch(p.type) {
-    case PKT_REGISTER:
-      // Bereits bekannte IP? → gleiche ID bestätigen (Re-Registrierung / Retry)
-      for (uint8_t i=1;i<=nodeCount;i++) {
-        if (nodes[i].ip==remoteIP) {
-          nodes[i].active   = true;
-          nodes[i].lastSeen = millis();
-          sendPkt(remoteIP,PKT_ACK,i,i);
-          delay(5); sendPkt(remoteIP,PKT_ACK,i,i);  // doppelt gegen Paketverlust
-          Serial.printf("[REG] Node %u re-registriert (%s)\n",i,remoteIP.toString().c_str());
-          return;
+    switch(p.type) {
+      case PKT_REGISTER: {
+        // Bereits bekannte IP? → gleiche ID bestätigen (Re-Registrierung / Retry)
+        bool found=false;
+        for (uint8_t i=1;i<=nodeCount;i++) {
+          if (nodes[i].ip==remoteIP) {
+            nodes[i].active   = true;
+            nodes[i].lastSeen = millis();
+            lastBtnSeq[i]     = 0;   // Tastenzaehler mit Node synchronisieren
+            sendPkt(remoteIP,PKT_ACK,i,i);
+            sendPkt(remoteIP,PKT_ACK,i,i);  // doppelt gegen Paketverlust
+            Serial.printf("[REG] Node %u re-registriert (%s)\n",i,remoteIP.toString().c_str());
+            found=true; break;
+          }
         }
+        if (found) break;
+        if (nodeCount>=MAX_NODES) { Serial.println("[REG] MAX_NODES erreicht!"); break; }
+        nodeCount++;
+        nodes[nodeCount].ip       = remoteIP;
+        nodes[nodeCount].active   = true;
+        nodes[nodeCount].lastSeen = millis();
+        lastBtnSeq[nodeCount]     = 0;
+        if (players[nodeCount].name[0]==0) snprintf(players[nodeCount].name,20,"Spieler %u",nodeCount);
+        sendPkt(remoteIP,PKT_ACK,nodeCount,nodeCount);
+        sendPkt(remoteIP,PKT_ACK,nodeCount,nodeCount);  // doppelt
+        Serial.printf("[REG] Node %u neu (%s)\n",nodeCount,remoteIP.toString().c_str());
+        break;
       }
-      if (nodeCount>=MAX_NODES) { Serial.println("[REG] MAX_NODES erreicht!"); return; }
-      nodeCount++;
-      nodes[nodeCount].ip       = remoteIP;
-      nodes[nodeCount].active   = true;
-      nodes[nodeCount].lastSeen = millis();
-      if (players[nodeCount].name[0]==0) snprintf(players[nodeCount].name,20,"Spieler %u",nodeCount);
-      sendPkt(remoteIP,PKT_ACK,nodeCount,nodeCount);
-      delay(5); sendPkt(remoteIP,PKT_ACK,nodeCount,nodeCount);  // doppelt
-      Serial.printf("[REG] Node %u neu (%s)\n",nodeCount,remoteIP.toString().c_str());
-      break;
 
-    case PKT_PING:
-      // Bekannte ID mit passender IP? -> lebendig markieren.
-      // Sonst (z.B. nach Master-Neustart): Node zum sauberen Reconnect zwingen.
-      if (p.nodeId>=1 && p.nodeId<=nodeCount && nodes[p.nodeId].ip==remoteIP) {
-        nodes[p.nodeId].active = true;
-        nodes[p.nodeId].lastSeen = millis();
-      } else {
-        sendPkt(remoteIP, PKT_RESET, 0xFF);  // unbekannt -> re-registrieren
+      case PKT_PING:
+        // Bekannte ID mit passender IP? -> lebendig markieren.
+        // Sonst (z.B. nach Master-Neustart): Node zum sauberen Reconnect zwingen.
+        if (p.nodeId>=1 && p.nodeId<=nodeCount && nodes[p.nodeId].ip==remoteIP) {
+          nodes[p.nodeId].active = true;
+          nodes[p.nodeId].lastSeen = millis();
+        } else {
+          sendPkt(remoteIP, PKT_RESET, 0xFF);  // unbekannt -> re-registrieren
+        }
+        break;
+
+      case PKT_BUTTON: {
+        uint8_t id=p.nodeId;
+        if (id<1||id>nodeCount||nodes[id].ip!=remoteIP) { sendPkt(remoteIP,PKT_RESET,0xFF); break; }
+        nodes[id].lastSeen=millis();
+        nodes[id].active=true;
+        // Dedup: Node sendet jeden Druck doppelt (gegen Verlust). data[0]=Sequenznr.
+        // Gleiche Sequenznr = Duplikat desselben Drucks -> ignorieren (sonst CTF doppelt weiter).
+        uint8_t seq=p.data[0];
+        if (seq==lastBtnSeq[id]) break;
+        lastBtnSeq[id]=seq;
+        Serial.printf("[BTN] Node %u\n",id);
+        if      (gameMode==GAME_CTF)         ctfOnButton(id);
+        else if (gameMode==GAME_MEMORY)      memOnButton(id);
+        else if (gameMode==GAME_BOMB)        bombOnButton(id);
+        else if (gameMode==GAME_REACTION)    reactOnButton(id);
+        else if (gameMode==GAME_SIMON)       simonOnButton(id);
+        else if (gameMode==GAME_HOTPOTATO)   potatoOnButton(id);
+        else if (gameMode==GAME_KINGHILL)    kingOnButton(id);
+        else if (gameMode==GAME_TUGWAR)      tugOnButton(id);
+        else if (gameMode==GAME_MINESWEEPER) mineOnButton(id);
+        else if (gameMode==GAME_KNOCKOUT)    knockOnButton(id);
+        else if (gameMode==GAME_COLORHUNT)   huntOnButton(id);
+        else if (gameMode==GAME_WHACKAMOLE)  whamOnButton(id);
+        break;
       }
-      break;
-
-    case PKT_BUTTON: {
-      uint8_t id=p.nodeId;
-      if (id<1||id>nodeCount||nodes[id].ip!=remoteIP) { sendPkt(remoteIP,PKT_RESET,0xFF); return; }
-      nodes[id].lastSeen=millis();
-      nodes[id].active=true;
-      Serial.printf("[BTN] Node %u\n",id);
-      if      (gameMode==GAME_CTF)         ctfOnButton(id);
-      else if (gameMode==GAME_MEMORY)      memOnButton(id);
-      else if (gameMode==GAME_BOMB)        bombOnButton(id);
-      else if (gameMode==GAME_REACTION)    reactOnButton(id);
-      else if (gameMode==GAME_SIMON)       simonOnButton(id);
-      else if (gameMode==GAME_HOTPOTATO)   potatoOnButton(id);
-      else if (gameMode==GAME_KINGHILL)    kingOnButton(id);
-      else if (gameMode==GAME_TUGWAR)      tugOnButton(id);
-      else if (gameMode==GAME_MINESWEEPER) mineOnButton(id);
-      else if (gameMode==GAME_KNOCKOUT)    knockOnButton(id);
-      else if (gameMode==GAME_COLORHUNT)   huntOnButton(id);
-      else if (gameMode==GAME_WHACKAMOLE)   whamOnButton(id);
-      break;
     }
   }
 }
@@ -1853,6 +1867,7 @@ void resetNodes() {
   for (uint8_t i=1;i<=nodeCount;i++) {
     nodes[i].active   = false;
     nodes[i].lastSeen = 0;
+    lastBtnSeq[i]     = 0;
   }
   nodeCount = 0;
   Serial.println("[RESET] Node-Liste geleert, Nodes re-registrieren sich.");

@@ -201,6 +201,7 @@ IPAddress masterIP;
 uint8_t  myId         = 0;
 uint32_t lastRegister = 0;
 uint32_t lastPing     = 0;
+uint8_t  pressSeq     = 0;   // Sequenznr je Tastendruck (Master dedupliziert doppelte Pakete)
 
 void sendPkt(uint8_t type, uint8_t nid,
              uint8_t d0=0,uint8_t d1=0,uint8_t d2=0,
@@ -215,15 +216,17 @@ void sendPkt(uint8_t type, uint8_t nid,
 }
 
 void handleUDP() {
-  int size = udp.parsePacket();
-  if (size < (int)sizeof(Packet)) return;
-
+  // GESAMTEN Empfangspuffer leeren (nicht nur 1 Paket pro Loop) – sonst stauen
+  // sich Pakete und LED-Befehle/ACKs kommen Sekunden zu spaet an.
+  int size;
+  while ((size = udp.parsePacket()) >= (int)sizeof(Packet)) {
   Packet p;
   udp.read((uint8_t*)&p, sizeof(p));
 
   switch (p.type) {
     case PKT_ACK:
       myId = p.data[0];
+      pressSeq = 0;   // mit Master synchronisieren
       Serial.printf("[NODE] Registered as node %u\n", myId);
       setLed(COL_GREEN, ANIM_FLASH);
       break;
@@ -263,8 +266,10 @@ void handleUDP() {
       Serial.println("[NODE] Reset empfangen – re-registriere...");
       myId = 0;
       lastRegister = 0;
+      pressSeq = 0;
       setLed(COL_BLUE, ANIM_BLINK_SLOW);
       break;
+  }
   }
 }
 
@@ -429,11 +434,16 @@ void loop() {
     sendPkt(PKT_PING, myId);  // zweites Paket als Backup
   }
 
-  // Button – Druck IMMER melden (Diagnose), aber nur bei Registrierung senden
+  // Button – Druck IMMER melden (Diagnose), aber nur bei Registrierung senden.
+  // Doppelt senden mit Sequenznr gegen Paketverlust; Master dedupliziert via seq.
   if (buttonPressed()) {
     if (myId != 0) {
-      Serial.printf("[NODE] Button pressed (id=%u) -> gesendet\n", myId);
-      sendPkt(PKT_BUTTON, myId);
+      pressSeq++;
+      if (pressSeq == 0) pressSeq = 1;   // 0 ist Sync-Reset reserviert
+      Serial.printf("[NODE] Button pressed (id=%u seq=%u) -> gesendet\n", myId, pressSeq);
+      sendPkt(PKT_BUTTON, myId, pressSeq);
+      delayMicroseconds(500);
+      sendPkt(PKT_BUTTON, myId, pressSeq);
     } else {
       Serial.println("[NODE] Button erkannt, aber noch nicht registriert (myId=0)");
     }
