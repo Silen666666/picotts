@@ -1194,17 +1194,26 @@ void handleUDP() {
 
   switch(p.type) {
     case PKT_REGISTER:
+      // Bereits bekannte IP? → gleiche ID bestätigen (Re-Registrierung / Retry)
       for (uint8_t i=1;i<=nodeCount;i++) {
-        if (nodes[i].ip==remoteIP) { nodes[i].lastSeen=millis(); sendPkt(remoteIP,PKT_ACK,i,i); return; }
+        if (nodes[i].ip==remoteIP) {
+          nodes[i].active   = true;
+          nodes[i].lastSeen = millis();
+          delay(random(0,30));  // kurzes Jitter damit ACKs sich nicht überschneiden
+          sendPkt(remoteIP,PKT_ACK,i,i);
+          Serial.printf("[REG] Node %u re-registriert (%s)\n",i,remoteIP.toString().c_str());
+          return;
+        }
       }
-      if (nodeCount>=MAX_NODES) return;
+      if (nodeCount>=MAX_NODES) { Serial.println("[REG] MAX_NODES erreicht!"); return; }
       nodeCount++;
       nodes[nodeCount].ip       = remoteIP;
       nodes[nodeCount].active   = true;
       nodes[nodeCount].lastSeen = millis();
       if (players[nodeCount].name[0]==0) snprintf(players[nodeCount].name,20,"Spieler %u",nodeCount);
+      delay(random(0,30));  // Jitter gegen gleichzeitige ACK-Kollision
       sendPkt(remoteIP,PKT_ACK,nodeCount,nodeCount);
-      Serial.printf("[REG] Node %u (%s)\n",nodeCount,remoteIP.toString().c_str());
+      Serial.printf("[REG] Node %u neu (%s)\n",nodeCount,remoteIP.toString().c_str());
       break;
 
     case PKT_PING:
@@ -1876,9 +1885,9 @@ void setup() {
   Serial.println("\n=== ESP CTF Game – Master ===");
 
   WiFi.mode(WIFI_AP);
-  if (strlen(WIFI_PASS)>0) WiFi.softAP(WIFI_SSID, WIFI_PASS);
-  else WiFi.softAP(WIFI_SSID);
-  Serial.printf("AP: %s  IP: %s\n", WIFI_SSID, WiFi.softAPIP().toString().c_str());
+  // Max 10 Verbindungen (ESP32-Default ist 4, reicht nicht fuer mehrere Nodes)
+  WiFi.softAP(WIFI_SSID, strlen(WIFI_PASS)>0 ? WIFI_PASS : nullptr, 1, 0, 10);
+  Serial.printf("AP: %s  IP: %s  maxConn:10\n", WIFI_SSID, WiFi.softAPIP().toString().c_str());
 
   udp.begin(UDP_PORT);
 

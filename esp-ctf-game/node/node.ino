@@ -287,8 +287,8 @@ void connectWiFi() {
       else WiFi.begin(WIFI_SSID);
       start = millis();
     }
-    // Blink while connecting
-    applyColor((millis() / 250) % 2 ? 0x000088 : 0);
+    // Gelb blinken = sucht WLAN (noch nicht verbunden)
+    applyColor((millis() / 300) % 2 ? 0x886600 : 0);
     delay(100);
     Serial.print('.');
   }
@@ -326,6 +326,10 @@ void setup() {
   applyColor(0xFF8000); delay(200); applyColor(0);
 
   connectWiFi();
+
+  // Zufaelliges Jitter 0-2s damit Nodes nicht gleichzeitig registrieren
+  randomSeed(ESP.getEfuseMac() ^ millis());
+  delay(random(0, 2000));
 
   // Register with master
   setLed(COL_BLUE, ANIM_BLINK_SLOW);
