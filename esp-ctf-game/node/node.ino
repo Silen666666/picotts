@@ -342,9 +342,11 @@ void loop() {
       Serial.println("[WARN] WiFi lost – ID zurueckgesetzt, warte auf Neuregistrierung");
       myId = 0;
       lastRegister = 0;
-      setLed(COL_BLUE, ANIM_BLINK_SLOW);
+      lastPing     = 0;
+      setLed(COL_YELLOW, ANIM_BLINK_FAST);  // gelb schnell = WLAN-Verlust
     }
     connectWiFi();
+    return;  // nach reconnect sofort neu starten (frischer Zustand)
   }
 
   handleUDP();
@@ -356,10 +358,12 @@ void loop() {
     Serial.println("[NODE] Registering...");
   }
 
-  // Keepalive ping
+  // Keepalive ping – doppelt senden fuer mehr Zuverlaessigkeit
   if (myId != 0 && millis() - lastPing >= PING_INTERVAL_MS) {
     lastPing = millis();
     sendPkt(PKT_PING, myId);
+    delayMicroseconds(500);
+    sendPkt(PKT_PING, myId);  // zweites Paket als Backup
   }
 
   // Button – Druck IMMER melden (Diagnose), aber nur bei Registrierung senden

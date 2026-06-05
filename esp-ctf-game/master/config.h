@@ -5,7 +5,7 @@
 #define WIFI_PASS        ""              // open network
 
 #define MAX_NODES        16
-#define NODE_TIMEOUT_MS  8000UL
+#define NODE_TIMEOUT_MS  15000UL   // 15s – toleriert kurze WLAN-Aussetzer
 
 // CTF
 #define CTF_TEAMS        2              // 2, 3, or 4

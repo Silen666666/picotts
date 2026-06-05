@@ -181,7 +181,7 @@ void setLED(uint8_t id, uint8_t color, uint8_t anim) {
 }
 
 void allLED(uint8_t color, uint8_t anim) {
-  for (uint8_t i=1;i<=nodeCount;i++) { if(nodes[i].active) setLED(i,color,anim); delay(15); }
+  for (uint8_t i=1;i<=nodeCount;i++) { if(nodes[i].active) setLED(i,color,anim); }
 }
 
 void setBar(uint8_t id, uint8_t color, uint8_t count, uint8_t bg) {
@@ -195,11 +195,11 @@ void setSplit(uint8_t id, uint8_t colorA, uint8_t countA, uint8_t colorB) {
 }
 
 void allBar(uint8_t color, uint8_t count, uint8_t bg) {
-  for (uint8_t i=1;i<=nodeCount;i++) { if(nodes[i].active) setBar(i,color,count,bg); delay(15); }
+  for (uint8_t i=1;i<=nodeCount;i++) { if(nodes[i].active) setBar(i,color,count,bg); }
 }
 
 void allSplit(uint8_t colorA, uint8_t countA, uint8_t colorB) {
-  for (uint8_t i=1;i<=nodeCount;i++) { if(nodes[i].active) setSplit(i,colorA,countA,colorB); delay(15); }
+  for (uint8_t i=1;i<=nodeCount;i++) { if(nodes[i].active) setSplit(i,colorA,countA,colorB); }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -211,7 +211,7 @@ static const char*   TEAM_NAMES[]  = {"Neutral","ROT","BLAU","GRUEN","GELB"};
 void ctfStart() {
   if (nodeCount<2) { Serial.println("[CTF] Mindestens 2 Nodes."); return; }
   gameMode=GAME_CTF; gameEndTime=millis()+(uint32_t)cfgDuration*1000;
-  for (uint8_t i=1;i<=nodeCount;i++) { ctfTeam[i]=0; setLED(i,COL_WHITE,ANIM_SOLID); delay(30); }
+  for (uint8_t i=1;i<=nodeCount;i++) { ctfTeam[i]=0; setLED(i,COL_WHITE,ANIM_SOLID); }
   Serial.printf("[CTF] Start: %u Nodes %us %u Teams\n",nodeCount,cfgDuration,cfgTeams);
 }
 
@@ -252,9 +252,9 @@ void memStart() {
   for (int i=n-1;i>0;i--) { int j=random(0,i+1); uint8_t t=pool[i];pool[i]=pool[j];pool[j]=t; }
   for (uint8_t i=1;i<=n;i++) { memColor[i]=pool[i-1]; memMatched[i]=false; }
   for (uint8_t i=n+1;i<=nodeCount;i++) setLED(i,COL_OFF,ANIM_SOLID);
-  for (uint8_t i=1;i<=n;i++) { setLED(i,memColor[i],ANIM_SOLID); delay(30); }
+  for (uint8_t i=1;i<=n;i++) { setLED(i,memColor[i],ANIM_SOLID); }
   delay(2000);
-  for (uint8_t i=1;i<=n;i++) { setLED(i,COL_OFF,ANIM_SOLID); delay(30); }
+  for (uint8_t i=1;i<=n;i++) { setLED(i,COL_OFF,ANIM_SOLID); }
   Serial.printf("[MEM] %u Paare\n",memTotalPairs);
 }
 
@@ -308,12 +308,12 @@ void bombStart() {
   allLED(COL_OFF,ANIM_SOLID); delay(200);
   setLED(bombNode,COL_RED,ANIM_BLINK_FAST);
   bombShowSequence();
-  for (uint8_t i=1;i<=nodeCount;i++) { setLED(i,(i==bombNode)?COL_RED:COL_WHITE,(i==bombNode)?ANIM_BLINK_FAST:ANIM_SOLID); delay(20); }
+  for (uint8_t i=1;i<=nodeCount;i++) { setLED(i,(i==bombNode)?COL_RED:COL_WHITE,(i==bombNode)?ANIM_BLINK_FAST:ANIM_SOLID); }
 }
 
 void bombOnButton(uint8_t id) {
   if (bombOver) return;
-  if (id==bombNode) { bombShowSequence(); for (uint8_t i=1;i<=nodeCount;i++) { setLED(i,(i==bombNode)?COL_RED:COL_WHITE,(i==bombNode)?ANIM_BLINK_FAST:ANIM_SOLID); delay(20); } return; }
+  if (id==bombNode) { bombShowSequence(); for (uint8_t i=1;i<=nodeCount;i++) { setLED(i,(i==bombNode)?COL_RED:COL_WHITE,(i==bombNode)?ANIM_BLINK_FAST:ANIM_SOLID); } return; }
   if (id==bombSeq[bombStep]) {
     setLED(id,COL_GREEN,ANIM_FLASH); bombStep++;
     if (bombStep==bombSeqLen) { bombOver=true; allLED(COL_GREEN,ANIM_BLINK_SLOW); gameMode=GAME_IDLE; Serial.println("[BOMB] ENTSCHAERFT!"); addHistory(GAME_BOMB,"Entschaerft",bombSeqLen); }
@@ -574,10 +574,8 @@ void potatoStart() {
   uint8_t startHolder = random(1, nodeCount+1);
   while (!potatoActive[startHolder]) startHolder = (startHolder % nodeCount) + 1;
   potatoHolder = 0;
-  // Show lives bars first
   for (uint8_t i=1;i<=nodeCount;i++) {
     if (nodes[i].active) potatoShowLives(i);
-    delay(20);
   }
   delay(500);
   potatoSetHolder(startHolder);
@@ -742,7 +740,6 @@ void tugStart() {
   uint8_t half = nodeCount / 2;
   for (uint8_t i=1;i<=nodeCount;i++) {
     setLED(i, (i<=half)?COL_RED:COL_BLUE, ANIM_SOLID);
-    delay(20);
   }
   delay(800);
   tugUpdateDisplay();

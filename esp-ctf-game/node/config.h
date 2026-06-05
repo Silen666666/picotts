@@ -41,5 +41,5 @@
 #define MASTER_IP          "192.168.4.1"
 
 #define REGISTER_RETRY_MS  2000
-#define PING_INTERVAL_MS   3000
+#define PING_INTERVAL_MS   2000    // oefter pingen fuer stabilere Verbindung
 #define WIFI_TIMEOUT_MS   15000
