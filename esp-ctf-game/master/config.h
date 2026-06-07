@@ -41,5 +41,11 @@
 #define WHAM_DELAY_MIN_MS    400
 #define WHAM_DELAY_MAX_MS    1800
 
+// Rundenabstand (Reaktion / Whack-a-Mole / Knockout)
+// Zeit in Sekunden, die nach jedem Treffer/Aussetzer als Pflichtpause gilt,
+// damit Spieler den vorherigen Gewinner-Node nicht einfach "nachmachen" koennen.
+// Einstellbar im Web-UI (0-30s). 0 = sofort wie bisher.
+#define ROUND_DELAY_S        10
+
 // Game History
 #define MAX_HISTORY  20

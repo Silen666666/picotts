@@ -73,6 +73,7 @@ uint8_t  cfgReactRounds  = REACT_ROUNDS_DEFAULT;
 uint8_t  cfgMines        = MINE_COUNT_DEFAULT;
 uint8_t  cfgKnockLives   = KNOCK_LIVES_DEFAULT;
 uint8_t  cfgHuntRounds   = COLORHUNT_ROUNDS;
+uint8_t  cfgRoundDelay   = ROUND_DELAY_S;    // Pflichtpause zwischen Runden (s)
 
 // CTF
 uint8_t ctfTeam[MAX_NODES + 1];
@@ -231,6 +232,44 @@ void finishGame(uint8_t winnerId, uint8_t winColor, uint8_t loserColor) {
   idleBlinkUntil = millis() + 10000UL;
   gameMode = GAME_IDLE;
 }
+
+// Gibt die Wartezeit (ms) zurueck, die nach einer Runde vergehen muss,
+// bevor die naechste startet. Besteht aus cfgRoundDelay + kleinem Zufallspuffer
+// (0.5-1.5s) damit alle Spieler wirklich gleichzeitig starten.
+uint32_t roundPauseMs() {
+  return (uint32_t)cfgRoundDelay * 1000UL + random(500, 1500);
+}
+
+// Zeigt allen Nodes waehrend der Rundenabstand-Pause einen Countdown-Balken:
+// Nodes leuchten kurz weiss auf, dann dimmt ein Balken von voll nach leer.
+// Laeuft nicht-blockierend – setzt nur nextAt, updateRoundBar() pollt.
+uint32_t roundBarStartAt = 0;
+uint32_t roundBarEndAt   = 0;
+uint8_t  roundBarLast    = 255;
+
+void startRoundBar(uint32_t pauseMs) {
+  roundBarStartAt = millis();
+  roundBarEndAt   = millis() + pauseMs;
+  roundBarLast    = 255;
+  allLED(COL_WHITE, ANIM_SOLID);  // kurzer weisser Aufblitz
+}
+
+void updateRoundBar() {
+  if (roundBarEndAt == 0) return;
+  uint32_t now = millis();
+  if ((long)(now - roundBarEndAt) >= 0) { roundBarEndAt = 0; roundBarStartAt = 0; return; }
+  uint32_t total = roundBarEndAt - roundBarStartAt;
+  uint32_t elapsed = now - roundBarStartAt;
+  uint8_t lit = (uint8_t)((total - elapsed) * NEO_COUNT_APPROX / total);
+  if (lit == roundBarLast) return;
+  roundBarLast = lit;
+  // Alle Nodes zeigen denselben schrumpfenden Weiss-Balken
+  for (uint8_t i=1;i<=nodeCount;i++)
+    if (nodes[i].active) sendPkt(nodes[i].ip, PKT_SET_BAR, i, COL_WHITE, lit, COL_OFF);
+}
+
+// NEO_COUNT aus dem Node (8) – Master kennt es nicht direkt, Konstante genuegt
+#define NEO_COUNT_APPROX 8
 
 void setLED(uint8_t id, uint8_t color, uint8_t anim) {
   if (id<1||id>nodeCount||!nodes[id].active) return;
@@ -478,22 +517,27 @@ void reactOnButton(uint8_t id) {
     players[id].points++;
     if (players[id].bestMs==0 || ms<players[id].bestMs) players[id].bestMs=ms;
     Serial.printf("[REACT] %s: %ums → %u Pkt\n", players[id].name, ms, players[id].points);
-    setLED(id, COL_GREEN, ANIM_FLASH);
-    for (uint8_t i=1;i<=nodeCount;i++) if(i!=id) setLED(i,COL_RED,ANIM_BLINK_FAST);
-    reactNextAt = millis() + random(REACT_DELAY_MIN_MS, REACT_DELAY_MAX_MS);
+    setLED(id, COL_GREEN, ANIM_SOLID);
+    for (uint8_t i=1;i<=nodeCount;i++) if(i!=id) setLED(i,COL_RED,ANIM_SOLID);
+    uint32_t pause = roundPauseMs();
+    startRoundBar(pause);
+    reactNextAt = millis() + pause;
   }
 }
 
 void reactUpdate() {
   if (gameMode!=GAME_REACTION) return;
   uint32_t now=millis();
+  updateRoundBar();
   if (reactRoundDone) {
     if (now>=reactNextAt) reactStartRound();
   } else if (now-reactLitAt > REACT_TIMEOUT_MS) {
     reactRoundDone=true;
     Serial.println("[REACT] Timeout – niemand gedrückt");
-    allLED(COL_ORANGE, ANIM_BLINK_SLOW);  // zeige Timeout ohne den Spielende-Timer zu setzen
-    reactNextAt = now + 1500;
+    allLED(COL_ORANGE, ANIM_SOLID);
+    uint32_t pause = roundPauseMs();
+    startRoundBar(pause);
+    reactNextAt = now + pause;
   }
 }
 
@@ -1020,6 +1064,7 @@ void knockUpdate() {
       }
       knockCountRemaining();
       knockGraceAt = 0;
+      updateRoundBar();
       if (knockRemaining <= 1) {
         uint8_t knockWinner = 0;
         for (uint8_t i=1;i<=nodeCount;i++) if (knockActive[i]) { knockWinner=i; break; }
@@ -1034,7 +1079,9 @@ void knockUpdate() {
         }
         return;
       }
-      knockNextAt = now + random(REACT_DELAY_MIN_MS, REACT_DELAY_MAX_MS);
+      uint32_t kpause = roundPauseMs();
+      startRoundBar(kpause);
+      knockNextAt = now + kpause;
     } else if (knockGraceAt == 0 && (long)(now - knockNextAt) >= 0) {
       knockStartRound();
     }
@@ -1206,9 +1253,11 @@ void whamOnButton(uint8_t id) {
     whamScores[id]++;
     players[id].points++;
     Serial.printf("[WHAM] %s trifft! Punkte: %u\n", players[id].name, whamScores[id]);
-    setLED(id, COL_GREEN, ANIM_FLASH);
+    setLED(id, COL_GREEN, ANIM_SOLID);
     for (uint8_t i=1;i<=nodeCount;i++) if(i!=id) setLED(i,COL_OFF,ANIM_SOLID);
-    whamNextAt = millis() + random(WHAM_DELAY_MIN_MS, WHAM_DELAY_MAX_MS);
+    uint32_t pause = roundPauseMs();
+    startRoundBar(pause);
+    whamNextAt = millis() + pause;
   } else {
     setLED(id, COL_RED, ANIM_BLINK_FAST);
   }
@@ -1217,13 +1266,16 @@ void whamOnButton(uint8_t id) {
 void whamUpdate() {
   if (gameMode!=GAME_WHACKAMOLE) return;
   uint32_t now = millis();
+  updateRoundBar();
   if (whamRoundDone) {
     if ((long)(now - whamNextAt) >= 0) whamStartRound();
   } else if (now - whamLitAt > WHAM_TIMEOUT_MS) {
     whamRoundDone = true;
-    setLED(whamTarget, COL_RED, ANIM_BLINK_FAST);
+    setLED(whamTarget, COL_RED, ANIM_SOLID);
     Serial.printf("[WHAM] Timeout! Node %u nicht getroffen.\n", whamTarget);
-    whamNextAt = millis() + random(WHAM_DELAY_MIN_MS, WHAM_DELAY_MAX_MS);
+    uint32_t pause = roundPauseMs();
+    startRoundBar(pause);
+    whamNextAt = millis() + pause;
   }
 }
 
@@ -1459,6 +1511,14 @@ summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6p
       <option value="30">30 Runden</option>
     </select>
   </div>
+  <div id="roundDelayOpts" class="hidden">
+    <label>&#9203; Rundenabstand (Sekunden)</label>
+    <input type="number" id="roundDelay" value="10" min="0" max="30">
+    <div style="font-size:.78rem;color:#8b949e;margin-top:3px">
+      Pflichtpause nach jedem Treffer &ndash; Gegner kann den vorherigen Node nicht einfach nachmachen.<br>
+      0 = sofort, 10 = 10&thinsp;s Pause + 0,5&ndash;1,5&thinsp;s Zufall.
+    </div>
+  </div>
   <div id="generalOpts">
     <label>Spielverlauf speichern (Anzahl)</label>
     <input type="number" id="historySize" value="20" min="3" max="20">
@@ -1531,6 +1591,8 @@ function modeChanged(){
   document.getElementById('knockOpts').classList.toggle('hidden',m!==10);
   document.getElementById('huntOpts').classList.toggle('hidden',m!==11);
   document.getElementById('whamOpts').classList.toggle('hidden',m!==12);
+  // Rundenabstand nur bei Reaktion / Knockout / Whack-a-Mole sinnvoll
+  document.getElementById('roundDelayOpts').classList.toggle('hidden',m!==4&&m!==10&&m!==12);
   var instrEl=document.getElementById('instrText');
   if(instrs[m]){instrEl.innerHTML=instrs[m];document.getElementById('instrDetails').classList.remove('hidden');}
   else{document.getElementById('instrDetails').classList.add('hidden');}
@@ -1550,6 +1612,7 @@ function startGame(){
   if(m==='10') q+='&klives='+document.getElementById('klives').value;
   if(m==='11') q+='&hrounds='+document.getElementById('hrounds').value;
   if(m==='12') q+='&whamrounds='+document.getElementById('whamRounds').value;
+  if(m==='4'||m==='10'||m==='12') q+='&rounddelay='+document.getElementById('roundDelay').value;
   q+='&history='+document.getElementById('historySize').value;
   post('/start',q);
 }
@@ -1836,13 +1899,14 @@ void webHandleStart() {
   if (webServer.hasArg("mines"))    cfgMines       = constrain(webServer.arg("mines").toInt(),1,nodeCount>1?nodeCount-1:1);
   if (webServer.hasArg("klives"))   cfgKnockLives  = constrain(webServer.arg("klives").toInt(),1,5);
   if (webServer.hasArg("hrounds"))  cfgHuntRounds  = constrain(webServer.arg("hrounds").toInt(),3,20);
-  if (webServer.hasArg("whamrounds")) cfgWhamRounds = constrain(webServer.arg("whamrounds").toInt(),5,30);
-  if (webServer.hasArg("history"))    cfgMaxHistory  = constrain(webServer.arg("history").toInt(),3,20);
+  if (webServer.hasArg("whamrounds"))  cfgWhamRounds  = constrain(webServer.arg("whamrounds").toInt(),5,30);
+  if (webServer.hasArg("history"))     cfgMaxHistory  = constrain(webServer.arg("history").toInt(),3,20);
+  if (webServer.hasArg("rounddelay")) cfgRoundDelay  = constrain(webServer.arg("rounddelay").toInt(),0,30);
   // duration used by king and tug too
   if (webServer.hasArg("duration")&&m==7) cfgDuration = constrain(webServer.arg("duration").toInt(),30,600);
   if (webServer.hasArg("duration")&&m==8) cfgDuration = constrain(webServer.arg("duration").toInt(),30,600);
 
-  gameMode=GAME_IDLE; idleBlinkUntil=0; allLED(COL_OFF,ANIM_SOLID); yieldDelay(100);
+  gameMode=GAME_IDLE; idleBlinkUntil=0; roundBarEndAt=0; allLED(COL_OFF,ANIM_SOLID); yieldDelay(100);
   if      (m==GAME_CTF)        ctfStart();
   else if (m==GAME_MEMORY)     memStart();
   else if (m==GAME_BOMB)       bombStart();
@@ -1859,7 +1923,7 @@ void webHandleStart() {
 }
 
 void webHandleStop() {
-  gameMode=GAME_IDLE; idleBlinkUntil=0; allLED(COL_OFF,ANIM_SOLID);
+  gameMode=GAME_IDLE; idleBlinkUntil=0; roundBarEndAt=0; allLED(COL_OFF,ANIM_SOLID);
   webServer.send(200,"text/plain","OK");
 }
 
