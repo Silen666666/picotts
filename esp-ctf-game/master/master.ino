@@ -106,8 +106,6 @@ uint8_t  simonSeq[20];
 uint8_t  simonLen;
 uint8_t  simonStep;
 bool     simonShowing;
-uint32_t simonTimer;
-uint8_t  simonShowIdx;
 uint8_t  simonHighScore;
 
 // Hot Potato
@@ -588,8 +586,30 @@ void reactUpdate() {
 // ─────────────────────────────────────────────────────────────
 // Simon Says (Game 5)
 // ─────────────────────────────────────────────────────────────
+// Jeder Node hat eine feste Farbe (Node 1=ROT, 2=BLAU, 3=GRUEN …).
+// Das macht die Sequenz merkbar: "ROT, BLAU, ROT, GRUEN" statt "Node 3, Node 1…"
+static const uint8_t SIMON_COLORS[] = {
+  COL_RED, COL_BLUE, COL_GREEN, COL_YELLOW,
+  COL_PURPLE, COL_CYAN, COL_ORANGE, COL_WHITE
+};
+#define SIMON_COL(nodeId)  SIMON_COLORS[((nodeId)-1) % 8]
+
+void simonShowSequence() {
+  allLED(COL_OFF, ANIM_SOLID);
+  yieldDelay(400);
+  for (uint8_t s = 0; s < simonLen; s++) {
+    setLED(simonSeq[s], SIMON_COL(simonSeq[s]), ANIM_SOLID);
+    yieldDelay(700);
+    setLED(simonSeq[s], COL_OFF, ANIM_SOLID);
+    yieldDelay(250);
+  }
+  // Kurze Pause, dann Eingabephase: alle Nodes zeigen ihre Farbe gedimmt (2 LEDs)
+  yieldDelay(200);
+  for (uint8_t i = 1; i <= nodeCount; i++)
+    setBar(i, SIMON_COL(i), 2, COL_OFF);   // 2/8 LEDs als Farbhinweis
+}
+
 void simonNextRound() {
-  // Sequenz ist voll (Array-Groesse 20) -> Spiel als gewonnen beenden
   if (simonLen >= 20) {
     Serial.println("[SIMON] Maximale Sequenz erreicht - gewonnen!");
     addHistory(GAME_SIMON, "Simon (max)", simonLen);
@@ -597,83 +617,58 @@ void simonNextRound() {
     gameMode = GAME_IDLE;
     return;
   }
-  // Extend sequence by 1
-  simonSeq[simonLen] = random(1, nodeCount+1);
+  simonSeq[simonLen] = random(1, nodeCount + 1);
   simonLen++;
-  simonShowIdx  = 0;
-  simonShowing  = true;
-  simonTimer    = millis();
-  // Turn all off before show
-  allLED(COL_OFF, ANIM_SOLID);
+  simonStep    = 0;
+  simonShowing = true;
   Serial.printf("[SIMON] Runde %u – zeige Sequenz\n", simonLen);
+  simonShowSequence();
+  simonShowing = false;
+  Serial.println("[SIMON] Eingabephase");
 }
 
 void simonStart() {
-  if (nodeCount<2) { Serial.println("[SIMON] Mindestens 2 Nodes."); return; }
-  gameMode      = GAME_SIMON;
-  simonLen      = 0;
-  simonStep     = 0;
+  if (nodeCount < 2) { Serial.println("[SIMON] Mindestens 2 Nodes."); return; }
+  gameMode       = GAME_SIMON;
+  simonLen       = 0;
+  simonStep      = 0;
   simonHighScore = 0;
   randomSeed(millis());
+  // Intro: alle Nodes zeigen kurz ihre Farbe damit Spieler die Zuordnung lernen
+  Serial.println("[SIMON] Zeige Node-Farben...");
+  for (uint8_t i = 1; i <= nodeCount; i++)
+    setLED(i, SIMON_COL(i), ANIM_SOLID);
+  yieldDelay(2000);
   allLED(COL_OFF, ANIM_SOLID);
-  yieldDelay(300);
+  yieldDelay(400);
   simonNextRound();
 }
 
 void simonOnButton(uint8_t id) {
-  if (simonShowing) return; // ignore during show phase
+  if (simonShowing) return;
   if (id == simonSeq[simonStep]) {
-    setLED(id, COL_GREEN, ANIM_FLASH);
+    setLED(id, SIMON_COL(id), ANIM_FLASH);
     simonStep++;
     if (simonStep == simonLen) {
-      // Completed this round
       Serial.printf("[SIMON] Runde %u korrekt!\n", simonLen);
       if (simonLen > simonHighScore) simonHighScore = simonLen;
-      yieldDelay(600);
-      simonStep = 0;
+      yieldDelay(800);
       simonNextRound();
     }
   } else {
-    // Wrong press – game over
-    Serial.printf("[SIMON] Falsch! Erreichte Runde: %u\n", simonLen);
+    Serial.printf("[SIMON] Falsch! Erreichte Laenge: %u\n", simonLen);
     addHistory(GAME_SIMON, "Simon", simonLen);
+    // Falschen Node rot zeigen, alle anderen kurz aufleuchten
+    setLED(id, COL_RED, ANIM_BLINK_FAST);
+    yieldDelay(800);
     gameOverBlink(COL_RED);
-    yieldDelay(1500);
-    allLED(COL_OFF, ANIM_SOLID);
     gameMode = GAME_IDLE;
   }
 }
 
 void simonUpdate() {
-  if (!simonShowing) return;
-  uint32_t now = millis();
-  uint32_t elapsed = now - simonTimer;
-
-  // Each step: 600ms ON, 200ms OFF = 800ms per step
-  uint8_t step = simonShowIdx;
-  if (step >= simonLen) {
-    // Show phase done – go to input phase
-    simonShowing = false;
-    simonStep    = 0;
-    allLED(COL_OFF, ANIM_SOLID);
-    Serial.println("[SIMON] Eingabephase");
-    return;
-  }
-
-  uint32_t stepStart = (uint32_t)step * 800UL;
-  uint32_t onEnd     = stepStart + 600UL;
-  uint32_t offEnd    = stepStart + 800UL;
-
-  if (elapsed < onEnd) {
-    // Light this node green
-    setLED(simonSeq[step], COL_GREEN, ANIM_SOLID);
-  } else if (elapsed < offEnd) {
-    // Turn off
-    setLED(simonSeq[step], COL_OFF, ANIM_SOLID);
-  } else {
-    // Advance to next step
-    simonShowIdx++;
-  }
+  // Sequenz wird blockend in simonShowSequence() gezeigt – kein Poll noetig.
+  // simonShowing = true waehrend der Anzeige (verhindert Button-Verarbeitung).
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1611,7 +1606,7 @@ var instrs={
   2:"Nodes leuchten 2s auf &ndash; merke dir die Farben. Druecke zwei gleich-farbige Nodes nacheinander. Kein Treffer? Beide gehen wieder aus.",
   3:"Ein Node blinkt ROT = Bombe! Die Sequenz der anderen Nodes zeigt die Reihenfolge zum Entschaerfen. Bombe druecken = Sequenz nochmal zeigen.",
   4:"Ein zufaelliger Node leuchtet GELB. Wer zuerst drueckt, bekommt einen Punkt. Reaktionszeit wird gemessen.",
-  5:"Simon zeigt eine Farb-Sequenz (Nodes leuchten nacheinander gruen auf). Wiederhole die Reihenfolge durch Druecken. Wird jede Runde laenger &ndash; bis du einen Fehler machst.",
+  5:"Jeder Node hat eine feste Farbe (Node 1=ROT, 2=BLAU …). Beim Start kurz alle Farben merken! Simon zeigt eine Sequenz &ndash; jeder Node leuchtet in seiner Farbe. Reihenfolge nachdr&uuml;cken. Jede Runde wird die Sequenz um einen Schritt l&auml;nger. Falscher Druck = Aus. W&auml;hrend Eingabe zeigen Nodes ihre Farbe gedimmt als Erinnerung.",
   6:"Ein Node haelt die Heisse Kartoffel (orange blinkend). Druecken gibt sie weiter. Wer sie beim Alarm haelt, verliert ein Leben. 3 Leben = 3 Balken.",
   7:"Der GOLDENE Node ist der Thron. Druecken = du haeltst ihn. Haltezeit = Punkte. Der Thron wandert alle 30s zu einem anderen Node weiter!",
   8:"Ungerade Nodes = ROT, gerade = BLAU. Jeder Druck verschiebt den Balken. Erste Farbe, die alle 8 LEDs fuellt, gewinnt!",
