@@ -76,7 +76,9 @@ uint8_t  cfgHuntRounds   = COLORHUNT_ROUNDS;
 uint8_t  cfgRoundDelay   = ROUND_DELAY_S;    // Pflichtpause zwischen Runden (s)
 
 // CTF
-uint8_t ctfTeam[MAX_NODES + 1];
+uint8_t  ctfTeam[MAX_NODES + 1];
+uint32_t ctfLockUntil[MAX_NODES + 1];  // Sperre je Node: Zeitstempel Ablauf (0 = frei)
+uint8_t  ctfBarLast[MAX_NODES + 1];    // letzter Balkenstand (255 = Neuzeichnen erzwingen)
 
 // Memory
 uint8_t  memColor[MAX_NODES + 1];
@@ -308,18 +310,60 @@ static const char*   TEAM_NAMES[]  = {"Neutral","ROT","BLAU","GRUEN","GELB"};
 void ctfStart() {
   if (nodeCount<2) { Serial.println("[CTF] Mindestens 2 Nodes."); return; }
   gameMode=GAME_CTF; gameEndTime=millis()+(uint32_t)cfgDuration*1000;
-  for (uint8_t i=1;i<=nodeCount;i++) { ctfTeam[i]=0; setLED(i,COL_WHITE,ANIM_SOLID); }
-  Serial.printf("[CTF] Start: %u Nodes %us %u Teams\n",nodeCount,cfgDuration,cfgTeams);
+  for (uint8_t i=1;i<=nodeCount;i++) {
+    ctfTeam[i]=0; ctfLockUntil[i]=0; ctfBarLast[i]=255;
+    setLED(i,COL_WHITE,ANIM_SOLID);
+  }
+  Serial.printf("[CTF] Start: %u Nodes %us %u Teams Sperre:%us\n",
+    nodeCount,cfgDuration,cfgTeams,cfgRoundDelay);
 }
 
 void ctfOnButton(uint8_t id) {
+  uint32_t now = millis();
+  // Sperre pruefen: Node wurde gerade eingenommen und ist noch gesperrt
+  if (cfgRoundDelay > 0 && ctfLockUntil[id] != 0 && now < ctfLockUntil[id]) {
+    uint32_t sek = (ctfLockUntil[id] - now + 999) / 1000;
+    Serial.printf("[CTF] Node %u gesperrt – noch %us\n", id, sek);
+    // Oranges Blinken = "noch nicht" Signal; Balken wird beim naechsten Update wiederhergestellt
+    sendPkt(nodes[id].ip, PKT_SET_LED, id, COL_ORANGE, ANIM_BLINK_FAST);
+    ctfBarLast[id] = 255;  // Balken beim naechsten ctfUpdate() sofort neu senden
+    return;
+  }
   ctfTeam[id]=(ctfTeam[id]%cfgTeams)+1;
-  setLED(id,TEAM_COLORS[ctfTeam[id]],ANIM_FLASH);
-  Serial.printf("[CTF] Node%u → %s\n",id,TEAM_NAMES[ctfTeam[id]]);
+  setLED(id, TEAM_COLORS[ctfTeam[id]], ANIM_FLASH);
+  if (cfgRoundDelay > 0) {
+    ctfLockUntil[id] = now + (uint32_t)cfgRoundDelay * 1000UL;
+    ctfBarLast[id]   = 255;
+  }
+  Serial.printf("[CTF] Node%u → %s%s\n", id, TEAM_NAMES[ctfTeam[id]],
+    cfgRoundDelay>0 ? " (gesperrt)" : "");
 }
 
 void ctfUpdate() {
-  if ((long)(millis()-gameEndTime)<0) return;
+  uint32_t now = millis();
+
+  // Sperr-Countdown: schrumpfender Balken in Teamfarbe, Entsperren wenn Zeit um
+  if (cfgRoundDelay > 0) {
+    for (uint8_t i=1;i<=nodeCount;i++) {
+      if (!nodes[i].active || ctfLockUntil[i]==0) continue;
+      if (now >= ctfLockUntil[i]) {
+        // Sperre abgelaufen -> solid Teamfarbe
+        ctfLockUntil[i]=0; ctfBarLast[i]=255;
+        setLED(i, TEAM_COLORS[ctfTeam[i]], ANIM_SOLID);
+        Serial.printf("[CTF] Node %u entsperrt\n", i);
+        continue;
+      }
+      // Balken: verbleibende Zeit als Anteil der 8 LEDs
+      uint32_t lockMs = (uint32_t)cfgRoundDelay * 1000UL;
+      uint8_t lit = (uint8_t)((ctfLockUntil[i]-now) * NEO_COUNT_APPROX / lockMs);
+      if (lit > NEO_COUNT_APPROX) lit = NEO_COUNT_APPROX;
+      if (lit == ctfBarLast[i]) continue;  // keine Aenderung -> kein UDP
+      ctfBarLast[i] = lit;
+      sendPkt(nodes[i].ip, PKT_SET_BAR, i, TEAM_COLORS[ctfTeam[i]], lit, COL_OFF);
+    }
+  }
+
+  if ((long)(now-gameEndTime)<0) return;
   uint8_t score[5]={0};
   for (uint8_t i=1;i<=nodeCount;i++) if(ctfTeam[i]>0&&ctfTeam[i]<=4) score[ctfTeam[i]]++;
   uint8_t winner=1;
@@ -1512,12 +1556,9 @@ summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6p
     </select>
   </div>
   <div id="roundDelayOpts" class="hidden">
-    <label>&#9203; Rundenabstand (Sekunden)</label>
+    <label id="roundDelayLabel">&#9203; Rundenabstand (Sekunden)</label>
     <input type="number" id="roundDelay" value="10" min="0" max="30">
-    <div style="font-size:.78rem;color:#8b949e;margin-top:3px">
-      Pflichtpause nach jedem Treffer &ndash; Gegner kann den vorherigen Node nicht einfach nachmachen.<br>
-      0 = sofort, 10 = 10&thinsp;s Pause + 0,5&ndash;1,5&thinsp;s Zufall.
-    </div>
+    <div id="roundDelayHint" style="font-size:.78rem;color:#8b949e;margin-top:3px"></div>
   </div>
   <div id="generalOpts">
     <label>Spielverlauf speichern (Anzahl)</label>
@@ -1591,8 +1632,18 @@ function modeChanged(){
   document.getElementById('knockOpts').classList.toggle('hidden',m!==10);
   document.getElementById('huntOpts').classList.toggle('hidden',m!==11);
   document.getElementById('whamOpts').classList.toggle('hidden',m!==12);
-  // Rundenabstand nur bei Reaktion / Knockout / Whack-a-Mole sinnvoll
-  document.getElementById('roundDelayOpts').classList.toggle('hidden',m!==4&&m!==10&&m!==12);
+  // Rundenabstand / Sperrdauer je nach Spielmodus
+  var rdShow=(m===1||m===4||m===10||m===12);
+  document.getElementById('roundDelayOpts').classList.toggle('hidden',!rdShow);
+  if(rdShow){
+    if(m===1){
+      document.getElementById('roundDelayLabel').innerHTML='&#128274; Sperrdauer nach Einnahme (Sekunden)';
+      document.getElementById('roundDelayHint').innerHTML='Node ist nach dem Druecken fuer diese Zeit gesperrt &ndash; schrumpfender Balken zeigt Restzeit. Gegner muss warten bevor er zurueckdruecken kann. 0 = keine Sperre.';
+    } else {
+      document.getElementById('roundDelayLabel').innerHTML='&#9203; Rundenabstand (Sekunden)';
+      document.getElementById('roundDelayHint').innerHTML='Pflichtpause nach jedem Treffer &ndash; Gegner kann nicht einfach nachmachen. Schrumpfender Balken zeigt Restzeit. 0 = sofort.';
+    }
+  }
   var instrEl=document.getElementById('instrText');
   if(instrs[m]){instrEl.innerHTML=instrs[m];document.getElementById('instrDetails').classList.remove('hidden');}
   else{document.getElementById('instrDetails').classList.add('hidden');}
@@ -1612,7 +1663,7 @@ function startGame(){
   if(m==='10') q+='&klives='+document.getElementById('klives').value;
   if(m==='11') q+='&hrounds='+document.getElementById('hrounds').value;
   if(m==='12') q+='&whamrounds='+document.getElementById('whamRounds').value;
-  if(m==='4'||m==='10'||m==='12') q+='&rounddelay='+document.getElementById('roundDelay').value;
+  if(m==='1'||m==='4'||m==='10'||m==='12') q+='&rounddelay='+document.getElementById('roundDelay').value;
   q+='&history='+document.getElementById('historySize').value;
   post('/start',q);
 }
@@ -1699,10 +1750,12 @@ function updateStatus(){
       var nc=document.getElementById('ctfNodeColors');nc.innerHTML='';
       nl.forEach(function(n){
         var t=(n.team===undefined)?0:n.team;
+        var locked=n.lock&&n.lock>0;
         var chip=document.createElement('div');chip.className='cnchip'+(n.on?'':' off');
-        chip.innerHTML='<div class="dot" style="background:'+tc[t]+'"></div>'
-          +'<div class="lbl">'+n.id+'. '+n.name+'</div>';
-        chip.title=n.name+' -> '+(['Neutral','ROT','BLAU','GRUEN','GELB'][t]||'?');
+        var lockBadge=locked?'<div style="font-size:.65rem;color:#e3b341;margin-top:2px">&#128274;'+n.lock+'s</div>':'';
+        chip.innerHTML='<div class="dot" style="background:'+tc[t]+';'+(locked?'opacity:.45':'')+'"></div>'
+          +'<div class="lbl">'+n.id+'. '+n.name+'</div>'+lockBadge;
+        chip.title=n.name+' → '+(['Neutral','ROT','BLAU','GRUEN','GELB'][t]||'?')+(locked?' (gesperrt '+n.lock+'s)':'');
         nc.appendChild(chip);});
     } else cs.classList.add('hidden');
 
@@ -1824,6 +1877,9 @@ void webHandleStatus() {
     j+="{\"id\":"+String(i)+",\"name\":\""+String(players[i].name)+"\",";
     j+="\"on\":"; j+=(nodes[i].active?"true":"false"); j+=",";
     j+="\"team\":"+String(gameMode==GAME_CTF?ctfTeam[i]:0)+",";
+    uint32_t lockSec=0;
+    if (gameMode==GAME_CTF && ctfLockUntil[i]>millis()) lockSec=(ctfLockUntil[i]-millis()+999)/1000;
+    j+="\"lock\":"+String(lockSec)+",";
     j+="\"v\":"+String(v)+"}";
     if (i<nodeCount) j+=",";
   }
