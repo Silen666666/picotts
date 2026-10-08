@@ -40,6 +40,13 @@
 #define WIFI_PASS          ""
 #define MASTER_IP          "192.168.4.1"
 
-#define REGISTER_RETRY_MS  2000
-#define PING_INTERVAL_MS   2000    // oefter pingen fuer stabilere Verbindung
-#define WIFI_TIMEOUT_MS   15000
+#define WIFI_TIMEOUT_MS   15000    // beim Start: WiFi.begin() nach dieser Zeit erneut
+// (Registrierung alle ~1 s und Status alle 2 s sind seit v2 fest im Sketch –
+//  sie gehoeren zum Protokoll mit dem Master.)
+
+// ----------------------------------------------------------------
+// OTA / Stabilitaet
+// ----------------------------------------------------------------
+#define OTA_PASSWORD   ""     // Passwort fuer Update per Arduino IDE ueber WLAN ("" = keins)
+#define USE_WATCHDOG   1      // ESP32: 1 = Node startet neu, falls die Firmware haengt
+#define WDT_TIMEOUT_S  30     // Watchdog-Zeit in Sekunden

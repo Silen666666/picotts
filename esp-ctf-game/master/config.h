@@ -2,10 +2,22 @@
 
 // WiFi AP created by the master
 #define WIFI_SSID        "ESP-CTF-Game"
-#define WIFI_PASS        ""              // open network
+#define WIFI_PASS        ""              // open network (sonst mind. 8 Zeichen!)
 
-#define MAX_NODES        16
+// WLAN-Kanal: 0 = automatisch (beim Start wird der freieste der Kanaele
+// 1/6/11 gesucht), sonst fester Kanal 1-13
+#define WIFI_CHANNEL     0
+// Max. gleichzeitige WLAN-Verbindungen am Master (ESP32: hoechstens 10)
+// => max. 9 Nodes + 1 Handy
+#define AP_MAX_CONN      10
+
+#define MAX_NODES        16        // IDs 1..16 (fest je Node-MAC, wird gespeichert)
 #define NODE_TIMEOUT_MS  15000UL   // 15s – toleriert kurze WLAN-Aussetzer
+
+// OTA / Stabilitaet
+#define OTA_PASSWORD     ""        // Passwort fuer Update per Arduino IDE ueber WLAN ("" = keins)
+#define USE_WATCHDOG     1         // ESP32: 1 = Master startet neu, falls die Firmware haengt
+#define WDT_TIMEOUT_S    30        // Watchdog-Zeit in Sekunden
 
 // CTF
 #define CTF_TEAMS        2              // 2, 3, or 4
