@@ -59,7 +59,7 @@
 
 // Zeiten (Teil des Protokolls – nur zusammen mit dem Master aendern)
 #define STATUS_INTERVAL_MS     2000UL   // STATUS/Keepalive an den Master
-#define MASTER_LOST_MS        12000UL   // so lange kein PONG -> ID verwerfen, neu registrieren
+#define MASTER_LOST_MS        20000UL   // so lange kein PONG -> ID verwerfen, neu registrieren (Master: Timeout 15 s)
 #define REGISTER_INTERVAL_MS   1000UL   // Registrierung wiederholen (+ Zufall 0..300 ms)
 #define WIFI_OVERLAY_MS        3000UL   // WLAN so lange weg -> gelb blinken
 #define WIFI_RECONNECT_MS     20000UL   // WLAN so lange weg -> WiFi.reconnect() (dann alle 20 s)
@@ -67,7 +67,7 @@
 #define OTA_ERROR_SHOW_MS      2000UL   // rot blinken nach OTA-Fehler
 // HTTP-OTA (ESP32)
 #define OTA_CONNECT_TIMEOUT_MS 5000
-#define OTA_HEADER_TIMEOUT_MS  5000UL   // Statuszeile + Header
+#define OTA_HEADER_TIMEOUT_MS 15000UL   // Statuszeile + Header (Master bedient nur einen Web-Client gleichzeitig)
 #define OTA_IDLE_TIMEOUT_MS   10000UL   // so lange keine Daten -> Abbruch
 #define OTA_TOTAL_TIMEOUT_MS 120000UL   // Gesamtdauer Download
 #define OTA_HDR_LEN           0x140     // so viele Byte werden VOR Update.begin() geprueft
@@ -491,7 +491,7 @@ void handlePacket(const Packet &p) {
       bool fresh = (myId == 0);
       myId        = id;
       ledApplied  = 0;                          // Master sendet den Soll-Zustand neu
-      btnNonce    = (uint8_t)random(1, 256);    // neue Tasten-Sitzung
+      { uint8_t nn; do nn = (uint8_t)random(1, 256); while (nn == btnNonce); btnNonce = nn; }   // neue Tasten-Sitzung (immer anderer Wert)
       pressSeq    = 0;
       btnPending  = false;
       lastPong    = now;
@@ -623,7 +623,7 @@ void statusService() {
   if (myId == 0) return;
   uint32_t now = millis();
   if (now - lastStatus >= STATUS_INTERVAL_MS) sendStatus();
-  if (myId != 0 && now - lastPong >= MASTER_LOST_MS) dropRegistration("Master antwortet nicht (12 s kein PONG)", 500);
+  if (myId != 0 && now - lastPong >= MASTER_LOST_MS) dropRegistration("Master antwortet nicht (20 s kein PONG)", 500);
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -262,6 +262,11 @@ uint16_t   totalGames    = 0;
 uint8_t  pendingAction = ACT_NONE;
 uint8_t  pendingArg    = 0;
 
+// Nur diese Aktionen brechen laufende Spiel-Animationen ab (yieldDelay -> false) und
+// verwerfen Tastendruecke. Harmlose Aktionen (Rollout-Start/-Abbruch, Firmware loeschen,
+// Reconnect) warten einfach, bis die Animation fertig ist.
+bool actAborts(uint8_t a) { return a == ACT_START || a == ACT_STOP || a == ACT_FORGET; }
+
 // PKT_RESET per Broadcast: 3x im Abstand von ~50 ms (nicht blockierend)
 uint8_t  rstBcastLeft = 0;
 uint32_t rstBcastNext = 0;
@@ -280,6 +285,8 @@ bool     appValidMarked    = false;
 uint32_t firstLoopAt       = 0;
 bool     rolloutActive     = false;   // Node-Firmware wird gerade verteilt
 String   fwMsg;                       // letzte Meldung Upload/Rollout fuer das Web-UI
+String   gameMsg;                     // Hinweis, warum ein Spiel nicht gestartet ist (wird ~15 s angezeigt)
+uint32_t gameMsgAt = 0;
 
 #ifdef ESP32
 Preferences prefs;
@@ -319,6 +326,7 @@ MD5Builder upMd5;
 #define RO_ERR_OFFLINE  22
 #define RO_ERR_VERSION  23
 bool     roCancel = false;
+bool     roForce  = false;   // "Alle neu flashen": Erfolg erst nach tatsaechlichem Update zaehlen
 uint8_t  roQueue[MAX_NODES];
 uint8_t  roQLen = 0, roQPos = 0;
 uint8_t  roCur = 0, roPhase = RO_IDLE, roTries = 0, roRegAt = 0;
@@ -455,17 +463,17 @@ void netPoll(bool inAnim) {
 }
 
 // Nicht-blockierendes Warten: Web, OTA, Empfang und LED-Wiederholungen laufen weiter.
-// Liefert false, sobald eine Web-Aktion (Start/Stop/...) ansteht -> Aufrufer soll abbrechen.
+// Liefert false, sobald Start/Stop/Vergessen ansteht -> Aufrufer soll abbrechen.
 bool yieldDelay(uint32_t ms) {
   uint32_t start = millis();
   while ((uint32_t)(millis() - start) < ms) {
-    if (pendingAction != ACT_NONE) return false;
+    if (actAborts(pendingAction)) return false;
     ArduinoOTA.handle();
     webServer.handleClient();
     netPoll(true);
     ledService();
     wdtFeed();
-    if (pendingAction != ACT_NONE) return false;
+    if (actAborts(pendingAction)) return false;
     yield();
   }
   return true;
@@ -591,7 +599,8 @@ void handleRegister(const uint8_t* mac, uint32_t ip) {
     if (id == 0) {
       uint32_t oldest = 0;
       for (uint8_t i = 1; i <= MAX_NODES; i++) {
-        if (!nodes[i].known || nodes[i].active) continue;
+        // nie einen Teilnehmer des laufenden Spiels ersetzen (Spielzustand verweist auf die ID)
+        if (!nodes[i].known || nodes[i].active || (gameMode != GAME_IDLE && inGame[i])) continue;
         uint32_t age = (uint32_t)(now - nodes[i].lastSeen);
         if (id == 0 || age > oldest) { id = i; oldest = age; }
       }
@@ -630,6 +639,7 @@ void handleRegister(const uint8_t* mac, uint32_t ip) {
   n.statusSeen = false;
   n.regCount++;
   n.ledAcked   = 0;      // Node hat nach der Registrierung nichts angewendet -> Soll-Zustand neu senden
+  n.lastBtnSeq = 0;      // neue Tasten-Sitzung (Node beginnt wieder bei Seq 1, die nie 0 ist)
   n.ledTries   = 0;
   n.ledSentAt  = 0;
   IPAddress rip(ip);
@@ -684,7 +694,7 @@ void processPacket(const Packet& p, IPAddress rip, bool inAnim) {
       if (nonce != n.btnNonce) n.btnNonce = nonce;   // neue Sitzung der Node -> verarbeiten
       else if (seq == n.lastBtnSeq) break;            // Wiederholung desselben Drucks
       n.lastBtnSeq = seq;
-      if (inAnim || rolloutActive || pendingAction != ACT_NONE) {
+      if (inAnim || rolloutActive || actAborts(pendingAction)) {
         Serial.printf("[BTN] Node %u (ignoriert: %s)\n", id,
           inAnim ? "Animation" : (rolloutActive ? "Firmware-Update" : "Aktion laeuft"));
         break;
@@ -752,6 +762,10 @@ void nodeTimeoutCheck() {
 #ifndef HUNT_ROUND_TIMEOUT_MS
   #define HUNT_ROUND_TIMEOUT_MS  12000UL   // Farbjagd: Runde ohne Treffer -> naechste Runde ohne Punkte
 #endif
+#ifndef GAME_SAFETY_MS
+  #define GAME_SAFETY_MS         900000UL  // Memory/Minesweeper: Notende nach 15 min (z.B. Node mit Paar/Feld ausgefallen)
+#endif
+uint32_t gameSafetyEnd = 0;   // Notende-Zeitpunkt fuer Spiele ohne eigenes Zeitlimit (0 = aus)
 
 // Zeitpunkt "jetzt + ms", nie 0 (0 bedeutet bei ctfLockUntil, memHideAt, knockGraceAt, ... "aus")
 uint32_t tAfter(uint32_t ms) { return (millis() + ms) | 1UL; }
@@ -830,6 +844,17 @@ void finishGame(uint8_t winnerId, uint8_t winColor, uint8_t loserColor) {
   }
   idleBlinkUntil = tAfter(10000UL);
   gameMode = GAME_IDLE;
+}
+
+// Notende fuer Spiele ohne eigenes Zeitlimit pruefen: true = Spiel wurde beendet
+bool gameSafetyExpired(uint8_t mode, uint16_t score) {
+  if (gameSafetyEnd == 0 || (long)(millis() - gameSafetyEnd) < 0) return false;
+  gameSafetyEnd = 0;
+  Serial.println("[GAME] Zeitlimit erreicht (15 min) – Spiel beendet.");
+  addHistory(mode, "Zeit abgelaufen", score);
+  gameOverBlink(COL_RED, ANIM_BLINK_SLOW);
+  gameMode = GAME_IDLE;
+  return true;
 }
 
 // Gibt die Wartezeit (ms) zurueck, die nach einer Runde vergehen muss,
@@ -977,6 +1002,7 @@ bool memStart() {
   uint8_t pc = collectActive(ids);
   if (pc < minNodesFor(GAME_MEMORY)) { Serial.println("[MEM] Mindestens 2 aktive Nodes."); return false; }
   gameMode=GAME_MEMORY;
+  gameSafetyEnd=tAfter(GAME_SAFETY_MS);
   memTotalPairs=pc/2;
   if (memTotalPairs>7) memTotalPairs=7;   // Palette hat nur 7 Farben -> sonst nicht unterscheidbar
   uint8_t n=memTotalPairs*2;              // so viele Teilnehmer spielen mit, der Rest bleibt aus
@@ -1011,6 +1037,7 @@ void memOnButton(uint8_t id) {
 }
 
 void memUpdate() {
+  if (gameSafetyExpired(GAME_MEMORY, memFoundPairs)) return;
   if (memHideAt==0||(long)(millis()-memHideAt)<0) return;
   memHideAt=0;
   if (memPending[0]>=0) { setLED(memPending[0],COL_OFF,ANIM_SOLID); memPending[0]=-1; }
@@ -1594,6 +1621,7 @@ bool mineStart() {
   uint8_t pc = collectActive(ids);
   if (pc < minNodesFor(GAME_MINESWEEPER)) { Serial.println("[MINE] Mindestens 3 aktive Nodes."); return false; }
   gameMode   = GAME_MINESWEEPER;
+  gameSafetyEnd = tAfter(GAME_SAFETY_MS);
   mineLives  = 3;
   mineScore  = 0;
   uint8_t mines = cfgMines;
@@ -2003,7 +2031,7 @@ void gameUpdate() {
   else if (gameMode==GAME_HOTPOTATO)  potatoUpdate();
   else if (gameMode==GAME_KINGHILL)   kingUpdate();
   else if (gameMode==GAME_TUGWAR)     tugUpdate();
-  // GAME_MINESWEEPER: event-driven, no timer update needed
+  else if (gameMode==GAME_MINESWEEPER) gameSafetyExpired(GAME_MINESWEEPER, mineScore);  // sonst ereignisgesteuert
   else if (gameMode==GAME_KNOCKOUT)   knockUpdate();
   else if (gameMode==GAME_COLORHUNT)  huntUpdate();
   else if (gameMode==GAME_WHACKAMOLE) whamUpdate();
@@ -2034,6 +2062,10 @@ void startGameNow(uint8_t m) {
   }
   // ok == false: zu wenige Nodes (Spiel laeuft nicht) oder Start-Animation abgekuerzt
   if (!ok && gameMode != GAME_IDLE) Serial.println("[GAME] Start-Animation abgekuerzt (Web-Aktion wartet)");
+  if (!ok && gameMode == GAME_IDLE && pendingAction == ACT_NONE) {
+    gameMsg = "Spiel nicht gestartet: mindestens " + String(minNodesFor(m)) + " verbundene Nodes noetig (verbunden: " + String(onlineCount()) + ").";
+    gameMsgAt = millis() | 1UL;
+  } else gameMsgAt = 0;
 }
 
 void stopGameNow() {
@@ -2251,26 +2283,34 @@ void webHandleNodeFwUpload() {
     Serial.printf("[FW] Node-Firmware-Upload: %s\n", up.filename.c_str());
     if (!fsOk) { upError("Dateisystem (LittleFS) nicht verfuegbar."); return; }
     if (gameMode != GAME_IDLE || rolloutActive) { upError("Nicht moeglich, waehrend ein Spiel oder Update laeuft."); return; }
-    // Es passt nur EIN Firmware-Image in den Speicher -> altes vorher loeschen
-    LittleFS.remove("/node.bin"); LittleFS.remove("/node.meta"); LittleFS.remove("/node.tmp");
-    memset(&nodeFw, 0, sizeof(nodeFw));
-    upFile = LittleFS.open("/node.tmp", "w");
-    if (!upFile) { upError("Datei konnte nicht angelegt werden."); return; }
+    // Die gespeicherte Firmware bleibt erhalten, bis der Kopf der neuen Datei geprueft ist
+    // (falsche Datei -> alte Node-Firmware ist danach noch da).
     upMd5.begin();
   } else if (up.status == UPLOAD_FILE_WRITE) {
     if (!upStarted || upFail || upKind != UP_NODE) return;
-    if (upTotal + up.currentSize > CTF_APP_MAX_SIZE) { upError("Datei zu gross (max. 1.310.720 Bytes)."); return; }
+    netPoll(true); ledService();     // Nodes waehrend des Uploads weiter bedienen (PONG), Tasten nicht ans Spiel
+    size_t off = 0;
     if (!upHdrOk) {
-      upCollectHdr(up.buf, up.currentSize);
-      if (upHdrLen >= IMG_HDR_LEN) {
-        String e = imageCheck(upHdr, CTF_ROLE_NODE, upDesc);
-        if (e.length()) { upError(e); return; }
-        upHdrOk = true;
-      }
+      off = upCollectHdr(up.buf, up.currentSize);
+      if (upHdrLen < IMG_HDR_LEN) return;            // Kopf noch unvollstaendig (Bytes liegen in upHdr)
+      String e = imageCheck(upHdr, CTF_ROLE_NODE, upDesc);
+      if (e.length()) { upError(e); return; }
+      upHdrOk = true;
+      // Kopf ist gueltig. Es passt nur EIN Firmware-Image in den Speicher -> erst jetzt das alte loeschen
+      LittleFS.remove("/node.bin"); LittleFS.remove("/node.meta"); LittleFS.remove("/node.tmp");
+      memset(&nodeFw, 0, sizeof(nodeFw));
+      upFile = LittleFS.open("/node.tmp", "w");
+      if (!upFile) { upError("Datei konnte nicht angelegt werden."); return; }
+      if (upFile.write(upHdr, IMG_HDR_LEN) != IMG_HDR_LEN) { upError("Speicher voll – Datei passt nicht in den Flash-Speicher."); return; }
+      upMd5.add(upHdr, IMG_HDR_LEN);
+      upTotal = IMG_HDR_LEN;
     }
-    if (upFile.write(up.buf, up.currentSize) != up.currentSize) { upError("Speicher voll – Datei passt nicht in den Flash-Speicher."); return; }
-    upMd5.add(up.buf, up.currentSize);
-    upTotal += up.currentSize;
+    size_t len = up.currentSize - off;
+    if (len == 0) return;
+    if (upTotal + len > CTF_APP_MAX_SIZE) { upError("Datei zu gross (max. 1.310.720 Bytes)."); return; }
+    if (upFile.write(up.buf + off, len) != len) { upError("Speicher voll – Datei passt nicht in den Flash-Speicher."); return; }
+    upMd5.add(up.buf + off, len);
+    upTotal += len;
   } else if (up.status == UPLOAD_FILE_END) {
     if (!upStarted || upFail || upKind != UP_NODE) return;
     if (!upHdrOk) { upError("Datei zu klein – keine gueltige Firmware."); return; }
@@ -2339,6 +2379,7 @@ void webHandleFwGet() {
     if (c.write(buf, n) != n) break;
     sent += n;
     wdtFeed();
+    netPoll(true); ledService();   // andere Nodes weiter bedienen (PONG) -> sie melden sich nicht ab
     if ((uint32_t)(millis() - t0) > 120000UL) break;
   }
   f.close();
@@ -2363,7 +2404,7 @@ void rolloutStart(bool force) {
     fwMsg = force ? String("Keine aktiven Nodes.") : "Alle aktiven Nodes haben bereits Version " + String(nodeFw.version) + ".";
     return;
   }
-  rolloutActive = true; roCancel = false; roPhase = RO_IDLE; roCur = 0;
+  rolloutActive = true; roCancel = false; roForce = force; roPhase = RO_IDLE; roCur = 0;
   fwMsg = "Rollout gestartet: " + String(roQLen) + " Node(s) – bitte eingeschaltet lassen.";
   Serial.printf("[ROLLOUT] Start (%s): %u Node(s), Version %s\n", force ? "alle" : "veraltete", roQLen, nodeFw.version);
 }
@@ -2415,13 +2456,19 @@ void rolloutService() {
   if (id < 1 || id > MAX_NODES) { roPhase = RO_IDLE; roQPos++; return; }
   NodeInfo& n = nodes[id];
   bool reReg = (n.regCount != roRegAt) && n.statusSeen;   // neu angemeldet + STATUS erhalten
-  if (reReg && fwEqualsStored(n))   { rolloutNodeDone(true, 0); return; }
+  // Erfolg = neu gestartet mit der gespeicherten Version. Beim Erzwingen ("alle neu flashen")
+  // haben die Nodes diese Version schon vorher -> dort nur nach angenommenem OTA (RO_WAIT) zaehlen.
+  if (reReg && fwEqualsStored(n) && (roPhase == RO_WAIT || !roForce)) { rolloutNodeDone(true, 0); return; }
+  if (reReg && roPhase == RO_SEND) {   // Node hat sich vor dem OTA neu angemeldet -> PKT_OTA erneut senden
+    roRegAt = n.regCount; if (roTries > 1) roTries = 1;
+  }
   if (n.otaState == OTA_ST_FAILED)  { rolloutNodeDone(false, n.otaErr ? n.otaErr : OTA_ERR_DOWNLOAD); return; }
   if (roPhase == RO_SEND) {
     if (n.otaState == OTA_ST_STARTED || n.otaState == OTA_ST_PROGRESS || n.otaState == OTA_ST_SUCCESS) {
       roPhase = RO_WAIT; roPhaseAt = now; roRegAt = n.regCount;   // ab jetzt auf Neustart warten
       return;
     }
+    if ((uint32_t)(now - roPhaseAt) >= 30000UL) { rolloutNodeDone(false, RO_ERR_NOANSWER); return; }   // Gesamtlimit
     if (roTries == 0 || (uint32_t)(now - roLastSend) >= 1500UL) {
       if (roTries >= 4) { rolloutNodeDone(false, RO_ERR_NOANSWER); return; }
       uint32_t sz = nodeFw.size;
@@ -2447,6 +2494,7 @@ void webHandleUpdateUpload() {
     markAppValid("Update gestartet");   // laufende Firmware funktioniert offensichtlich
   } else if (up.status == UPLOAD_FILE_WRITE) {
     if (!upStarted || upFail || upKind != UP_MASTER) return;
+    netPoll(true); ledService();     // Nodes waehrend des Uploads weiter bedienen (PONG)
     size_t off = 0;
     if (!upHdrOk) {
       off = upCollectHdr(up.buf, up.currentSize);
@@ -2848,13 +2896,13 @@ var instrs={
   2:"Nodes leuchten 2s auf &ndash; merke dir die Farben. Druecke zwei gleich-farbige Nodes nacheinander. Kein Treffer? Beide gehen wieder aus.",
   3:"Ein Node blinkt ROT = Bombe! Die Sequenz der anderen Nodes zeigt die Reihenfolge zum Entschaerfen. Bombe druecken = Sequenz nochmal zeigen.",
   4:"Ein zufaelliger Node leuchtet GELB. Wer zuerst drueckt, bekommt einen Punkt. Reaktionszeit wird gemessen.",
-  5:"Jeder Node hat eine feste Farbe (Node 1=ROT, 2=BLAU …). Beim Start kurz alle Farben merken! Simon zeigt eine Sequenz &ndash; jeder Node leuchtet in seiner Farbe. Reihenfolge nachdr&uuml;cken. Jede Runde wird die Sequenz um einen Schritt l&auml;nger. Falscher Druck = Aus. W&auml;hrend Eingabe zeigen Nodes ihre Farbe gedimmt als Erinnerung.",
+  5:"Jeder mitspielende Node hat eine feste Farbe (nach Nummer: ROT, BLAU, GRUEN …). Beim Start kurz alle Farben merken! Simon zeigt eine Sequenz &ndash; jeder Node leuchtet in seiner Farbe. Reihenfolge nachdr&uuml;cken. Jede Runde wird die Sequenz um einen Schritt l&auml;nger. Falscher Druck = Aus. W&auml;hrend Eingabe zeigen Nodes ihre Farbe gedimmt als Erinnerung.",
   6:"Ein Node haelt die Heisse Kartoffel (orange blinkend). Druecken gibt sie weiter. Wer sie beim Alarm haelt, verliert ein Leben. 3 Leben = 3 Balken.",
   7:"Der GOLDENE Node ist der Thron. Druecken = du haeltst ihn. Haltezeit = Punkte. Der Thron wandert alle 30s zu einem anderen Node weiter!",
-  8:"Ungerade Nodes = ROT, gerade = BLAU. Jeder Druck verschiebt den Balken. Erste Farbe, die alle 8 LEDs fuellt, gewinnt!",
+  8:"Die erste Haelfte der Nodes (kleinere Nummern) ist ROT, der Rest BLAU &ndash; beim Start leuchten die Teamfarben kurz auf. Jeder Druck verschiebt den Balken. Erste Farbe, die alle 8 LEDs fuellt, gewinnt (sonst wer bei Zeitende vorne liegt)!",
   9:"Manche Nodes sind Minen. Druecke Nodes frei: Gruen = sicher (+Punkt), Rot = Mine (-Leben). 3 Leben insgesamt. Alle sicheren Nodes finden = Sieg!",
   10:"Wie Reaktion, aber mit Elimination. Ein Node leuchtet gelb &ndash; 2s Gnadenfrist nach dem ersten Treffer. Wer nicht drueckt, verliert ein Leben. Letzter gewinnt!",
-  11:"Nodes zeigen kurz ihre zugewiesene Farbe. Dann: Node 1 blinkt die ZIELFARBE. Wer zuerst den passenden Node drueckt, bekommt einen Punkt. Meiste Punkte nach allen Runden gewinnt.",
+  11:"Nodes zeigen kurz ihre zugewiesene Farbe. Dann blinkt der erste mitspielende Node (kleinste Nummer) die ZIELFARBE. Wer zuerst den passenden Node drueckt, bekommt einen Punkt. Meiste Punkte nach allen Runden gewinnt.",
   12:"Nodes leuchten zufaellig gelb auf. Wer zuerst den leuchtenden Node drueckt, bekommt einen Punkt. Falscher Druck = kurz Rot. Nach allen Runden gewinnt der mit den meisten Treffern."
 };
 
@@ -2977,18 +3025,21 @@ function renderBanners(d,nl){
 }
 
 var upBusy=false;
+function upLock(v){['mUpBtn','nUpBtn','roBtn1','roBtn2','fwDel'].forEach(function(i){dis(i,v);});}
 function upFile(url,fileId,barId,msgId,cb){
+  if(upBusy)return;                                   // kein zweiter Upload parallel (Doppelklick)
   var inp=document.getElementById(fileId),f=inp.files&&inp.files[0],m=document.getElementById(msgId);
   if(!f){m.className='fwmsg err';m.textContent='Bitte zuerst eine .bin-Datei auswaehlen.';return;}
   if(/merged|bootloader|partitions/i.test(f.name)){m.className='fwmsg err';m.textContent='Falsche Datei ('+f.name+'): bitte die <sketch>.ino.bin verwenden, nicht .merged/.bootloader/.partitions.bin.';return;}
   var bar=document.getElementById(barId);bar.parentNode.classList.remove('hidden');bar.style.width='0%';
-  m.className='fwmsg';m.textContent='Lade hoch...';upBusy=true;
+  m.className='fwmsg';m.textContent='Lade hoch...';upBusy=true;upLock(true);
   var fd=new FormData();fd.append('firmware',f,f.name);
   var x=new XMLHttpRequest();x.open('POST',url,true);
   x.upload.onprogress=function(e){if(e.lengthComputable){var p=Math.round(e.loaded*100/e.total);bar.style.width=p+'%';m.textContent=p<100?('Lade hoch... '+p+' %'):'Wird geprueft...';}};
   x.onload=function(){upBusy=false;var r;try{r=JSON.parse(x.responseText);}catch(e){r={ok:false,msg:'Unerwartete Antwort (HTTP '+x.status+')'};}
-    m.className='fwmsg'+(r.ok?'':' err');m.textContent=r.msg||'';if(!r.ok)bar.style.width='0%';if(cb)cb(r);};
-  x.onerror=function(){upBusy=false;m.className='fwmsg err';m.textContent='Verbindung abgebrochen.';bar.style.width='0%';};
+    m.className='fwmsg'+(r.ok?'':' err');m.textContent=r.msg||'';if(!r.ok)bar.style.width='0%';if(cb)cb(r);
+    if(!upBusy){stBusy=0;updateStatus();}};             // Knoepfe sofort wieder richtig setzen (nicht beim Master-Neustart)
+  x.onerror=function(){upBusy=false;m.className='fwmsg err';m.textContent='Verbindung abgebrochen.';bar.style.width='0%';stBusy=0;updateStatus();};
   x.send(fd);
 }
 function upMaster(){upFile('/update?json=1','mFile','mBar','mMsg',function(r){if(r.ok){upBusy=true;document.getElementById('mMsg').textContent=r.msg+' Seite wird in 10 s neu geladen.';setTimeout(function(){location.reload();},10000);}});}
@@ -3005,7 +3056,7 @@ function renderFw(d,nl){
   document.getElementById('mUpSec').classList.toggle('hidden',!hasFs);
   document.getElementById('fwNodeSec').classList.toggle('hidden',!hasFs);
   var ro=d.rollout||{},roAct=!!ro.active;
-  dis('startBtn',roAct);dis('forgetBtn',roAct);
+  dis('startBtn',roAct);dis('forgetBtn',roAct);dis('resetBtn',roAct);
   if(!hasFs)return;
   var nf=d.nodeFw||{},run=!!d.running;
   document.getElementById('nFw').textContent=nf.present?(nf.version+' ('+Math.round(nf.size/1024)+' KB)'):'keine';
@@ -3055,6 +3106,7 @@ function updateStatus(){
     // Info-Zeile (Bombe/Simon/Tauziehen/Minesweeper)
     var il=document.getElementById('infoLine');
     if(d.running&&d.info&&d.info.length>0){il.classList.remove('hidden');il.textContent=d.info;}
+    else if(!d.running&&d.gameMsg){il.classList.remove('hidden');il.textContent=d.gameMsg;}
     else il.classList.add('hidden');
 
     var mb=document.getElementById('modeName');
@@ -3357,6 +3409,8 @@ void webHandleStatus() {
   }
   j += '}';
   j += ",\"fwMsg\":"; jsonStr(j, fwMsg.c_str());
+  if (gameMsgAt && (uint32_t)(millis() - gameMsgAt) > 15000UL) gameMsgAt = 0;
+  j += ",\"gameMsg\":"; jsonStr(j, gameMsgAt ? gameMsg.c_str() : "");
 #endif
   j += '}';
 
@@ -3389,7 +3443,10 @@ void webHandleStart() {
 }
 
 void webHandleStop()  { webSetPending(ACT_STOP, 0); }
-void webHandleReset() { webSetPending(ACT_RECONNECT, 0); }
+void webHandleReset() {
+  if (rolloutActive) { webServer.send(409,"text/plain","Nicht moeglich, waehrend die Nodes aktualisiert werden."); return; }
+  webSetPending(ACT_RECONNECT, 0);
+}
 
 void webHandleForget() {
   if (rolloutActive) { webServer.send(409,"text/plain","Nicht moeglich, waehrend die Nodes aktualisiert werden."); return; }
@@ -3400,7 +3457,8 @@ void webHandleIdentify() {
   int id = webServer.arg("id").toInt();
   if (id < 1 || id > MAX_NODES || !nodes[id].known) { webServer.send(400,"text/plain","Unbekannte Node"); return; }
   if (!nodes[id].active) { webServer.send(409,"text/plain","Node ist offline"); return; }
-  webSetPending(ACT_IDENTIFY, (uint8_t)id);
+  identifyNode((uint8_t)id);   // nur ein UDP-Paket, aendert keinen Spielzustand -> direkt, ohne Spiel-Animation abzubrechen
+  webServer.send(200, "text/plain", "OK");
 }
 
 // Namen: hoechstens 19 Byte, keine Steuerzeichen, keine halben UTF-8-Zeichen
