@@ -1,6 +1,9 @@
 ╔══════════════════════════════════════════════════════════════════╗
-║              ESP CTF GAME – VERDRAHTUNGSSCHEMA                   ║
+║              ESP CTF GAME – VERDRAHTUNGSSCHEMA  (v2.0)           ║
 ╚══════════════════════════════════════════════════════════════════╝
+
+  Ziel-Hardware: ESP32-WROOM-32 "NodeMCU" Board (30 Pins).
+  Pins stehen in node/config.h (NEO_PIN, BUTTON_PIN).
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   A) NODE  (je 1× pro Spielstation)
@@ -8,22 +11,23 @@
 
   STROMVERSORGUNG
   ───────────────
-  Powerbank / USB-Ladegerät 5V
+  Powerbank / USB-Netzteil 5V (mind. 1 A empfohlen)
         │
-        └── Micro-USB ──► ESP (NodeMCU oder D1 Mini)
+        └── Micro-USB ──► ESP32-Board
+
+  ⚠ Zeigt das Web-UI bei einer Node "Brownout", ist die Stromversorgung
+    zu schwach (dünnes/langes Kabel, schwache Powerbank). Das führt zu
+    Neustarts und Verbindungsabbrüchen genau dieser Node.
 
 
   WS2812B-8 LED-Leiste
   ─────────────────────
-  (Linke Seite des Moduls)
-
-   WS2812B-8             NodeMCU/D1 Mini
-  ┌──────────┐           ┌─────────────┐
-  │  GND  ───┼───────────┤ GND         │
-  │  IN   ───┼──[300Ω]───┤ D4 (GPIO2)  │
-  │  VCC  ───┼───────────┤ VIN (5V)    │
-  │  GND  ───┼───────────┤ GND         │  (Masseschleife)
-  └──────────┘           └─────────────┘
+   WS2812B-8             ESP32 NodeMCU (30 Pin)
+  ┌──────────┐           ┌──────────────────┐
+  │  GND  ───┼───────────┤ GND              │
+  │  IN   ───┼──[300Ω]───┤ D13  (GPIO13)    │
+  │  VCC  ───┼───────────┤ VIN  (5V)        │
+  └──────────┘           └──────────────────┘
 
   RECHTE SEITE (OUT, GND, VCC, GND): frei lassen
   oder mit nächstem WS2812B-Modul verketten
@@ -31,85 +35,92 @@
 
   TASTER (Momentary Push Button)
   ───────────────────────────────
-   Taster          NodeMCU/D1 Mini
-  ┌────────┐       ┌─────────────┐
-  │ Pin 1 ─┼───────┤ D3 (GPIO0)  │
-  │ Pin 2 ─┼───────┤ GND         │
-  └────────┘       └─────────────┘
+   Taster          ESP32 NodeMCU
+  ┌────────┐       ┌──────────────────┐
+  │ Pin 1 ─┼───────┤ D18  (GPIO18)    │
+  │ Pin 2 ─┼───────┤ GND              │
+  └────────┘       └──────────────────┘
 
   → KEIN externer Widerstand nötig (interner Pull-Up aktiv)
+  → NICHT GPIO0 (BOOT-Taste) verwenden – liegt nicht auf der Stiftleiste
+    und stört den Bootvorgang.
 
 
   WICHTIGE HINWEISE
   ─────────────────
   • 300 Ω Widerstand auf der Datenleitung (IN-Pin) schützt WS2812B
-  • Kondensator 100–470 µF zwischen VCC und GND der LED (optional,
-    verhindert Spannungseinbrüche bei Farbwechseln)
-  • GPIO0 (D3) beim Booten nicht gedrückt halten → ESP bleibt im
-    Flash-Modus. Einfach loslassen, dann normal funktionsfähig.
+  • Kondensator 100–470 µF zwischen VCC und GND der LED-Leiste
+    (empfohlen: verhindert Spannungseinbrüche bei Farbwechseln)
+  • Alle GND-Leitungen verbinden (LED, Taster, ESP)
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   B) MASTER  (1× zentral)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Nur Stromversorgung via USB – kein Button, keine LED nötig.
-  Konfiguration über Browser (Handy verbindet sich mit WLAN des Masters).
-
-  Optional: Eine eigene LED am Master für Status (D4/GPIO2).
+  Nur Stromversorgung via USB – kein Taster, keine LED nötig.
+  Bedienung über Browser (Handy verbindet sich mit dem WLAN des Masters).
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  C) GESAMTÜBERSICHT (Beispiel 3 Nodes)
+  C) GESAMTÜBERSICHT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   ┌──────────────────────────────────────────┐
-  │                MASTER-ESP                │
-  │   WiFi-AP "ESP-CTF-Game"                 │
-  │   Webserver → http://192.168.4.1         │
+  │                MASTER-ESP32              │
+  │   WLAN-AP "ESP-CTF-Game"                 │
+  │   Web-UI → http://192.168.4.1            │
+  │   speichert Node-Firmware für OTA        │
   └────────────┬─────────────────────────────┘
-               │ WiFi (UDP)
+               │ WLAN (UDP)
        ┌───────┼──────────────────┐
        │       │                  │
   ┌────┴──┐ ┌──┴────┐ ┌──────────┴┐
-  │Node 1 │ │Node 2 │ │  Node 3   │
+  │Node 1 │ │Node 2 │ │  Node 3   │  …  max. 9 Nodes
   │ LED   │ │ LED   │ │  LED      │
-  │ Btn   │ │ Btn   │ │  Btn      │
+  │ Taster│ │ Taster│ │  Taster   │
   └───────┘ └───────┘ └───────────┘
 
   Handy ──WLAN──► "ESP-CTF-Game" ──► Browser: http://192.168.4.1
 
+  ⚠ Der ESP32-Access-Point erlaubt höchstens 10 gleichzeitige
+    WLAN-Geräte: also max. 9 Nodes + 1 Handy.
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  D) NODEMCU PINBELEGUNG (Übersicht)
+  D) ESP32 NODEMCU (30 PIN) – BELEGUNG
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-          ┌──[USB]──┐
-  A0    ──┤         ├── D0  (GPIO16)
-  RSV   ──┤         ├── D1  (GPIO5)
-  RSV   ──┤         ├── D2  (GPIO4)
-  SD3   ──┤         ├── D3  (GPIO0) ◄── TASTER
-  SD2   ──┤         ├── D4  (GPIO2) ◄── WS2812B IN
-  SD1   ──┤         ├── 3V3
-  CMD   ──┤         ├── GND
-  SD0   ──┤         ├── VIN (5V) ◄── WS2812B VCC
-  CLK   ──┤         ├── RST
-  GND   ──┤         ├── EN
-  3V3   ──┤         ├── TX
-  VIN   ──┤         ├── RX
-          └─────────┘
+  (Antenne oben, USB-Buchse unten – typisches 30-Pin "DevKit V1")
+
+                       ┌──[Antenne]──┐
+                 EN ───┤             ├─── D23
+            VP (36) ───┤             ├─── D22
+            VN (39) ───┤             ├─── TX0
+                D34 ───┤             ├─── RX0
+                D35 ───┤             ├─── D21
+                D32 ───┤             ├─── D19
+                D33 ───┤             ├─── D18  ◄── TASTER (2. Pin an GND)
+                D25 ───┤             ├─── D5
+                D26 ───┤             ├─── TX2
+                D27 ───┤             ├─── RX2
+                D14 ───┤             ├─── D4
+                D12 ───┤             ├─── D2
+  WS2812B IN ►  D13 ───┤             ├─── D15
+  LED/Taster ►  GND ───┤             ├─── GND
+  WS2812B VCC►  VIN ───┤             ├─── 3V3
+                       └───[USB]─────┘
+
+  (Die genaue Reihenfolge der Pins kann je nach Board-Hersteller
+   leicht abweichen – maßgeblich ist die Beschriftung auf dem Board:
+   "D13", "D18", "GND", "VIN".)
 
 
-  D) WEMOS D1 MINI PINBELEGUNG (kompaktere Alternative)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  E) ESP8266 (NodeMCU / D1 mini) – nur noch eingeschränkt
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-          ┌──[USB]──┐
-  RST   ──┤         ├── TX
-  A0    ──┤         ├── RX
-  D0    ──┤         ├── D1  (GPIO5)
-  D5    ──┤         ├── D2  (GPIO4)
-  D6    ──┤         ├── D3  (GPIO0) ◄── TASTER
-  D7    ──┤         ├── D4  (GPIO2) ◄── WS2812B IN
-  D8    ──┤         ├── GND ◄── WS2812B GND / Taster
-  3V3   ──┤         ├── 5V  ◄── WS2812B VCC
-          └─────────┘
+  Ab v2.0 wird nur noch der ESP32 getestet. Für ESP8266-Nodes gelten
+  (ohne OTA-Verteilung über den Master):
+    WS2812B IN  → D2 (GPIO4)
+    Taster      → D1 (GPIO5) und GND
