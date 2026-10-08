@@ -1,128 +1,199 @@
-# ESP CTF Game
+# ESP CTF Game (v2.0.0)
 
-Multiplayer physical game system using ESP8266 / ESP32 nodes with RGB LEDs and buttons.
+Mehrspieler-Bewegungsspiel mit ESP32-„Nodes“ (LED-Leiste + Taster) und einem
+ESP32-„Master“, der ein eigenes WLAN aufspannt und über den Handy-Browser
+bedient wird. 12 Spiele, darunter Capture the Flag, Reaktion, Simon Says und
+Whack-a-Mole.
+
+Ab v2.0 können **Master und Nodes kabellos aktualisiert werden (OTA)**:
+Firmware einmal im Browser hochladen, und der Master verteilt sie an alle Nodes.
+
+---
 
 ## Hardware
 
-### Per Node
-| Part | Notes |
+| Teil | Hinweis |
 |---|---|
-| ESP8266 (NodeMCU/Wemos) or ESP32 | Both supported |
-| WS2812B NeoPixel LED (recommended) | Or simple RGB LED (common-cathode/anode) |
-| Momentary push button | Any tactile button |
-| 10 kΩ resistor (optional) | If not using internal pull-up |
+| ESP32-WROOM-32 „NodeMCU“ (30 Pin) | 1× Master + 1× je Node |
+| WS2812B-8 LED-Leiste | an **D13** (über 300 Ω) |
+| Taster | an **D18** und GND (kein Widerstand nötig) |
+| USB-Netzteil / Powerbank 5 V, mind. 1 A | je Node |
 
-### Master
-One additional ESP (same type) acts as the master. It needs no LED/button, just power + serial for the menu.
+Verdrahtung im Detail: [VERDRAHTUNG.txt](VERDRAHTUNG.txt)
 
----
-
-## Wiring
-
-### Node – NeoPixel (recommended)
-
-```
-ESP8266 NodeMCU:            ESP32:
-  D4 (GPIO2) ──► DIN        GPIO13 ──► DIN
-  3.3V / 5V  ──► VCC        3.3V   ──► VCC
-  GND        ──► GND        GND    ──► GND
-
-  D3 (GPIO0) ──► Button ──► GND
-```
-
-### Node – Simple RGB LED (common-cathode)
-
-```
-ESP8266:          ESP32:
-  D5 ──[R]──► R    GPIO25
-  D6 ──[G]──► G    GPIO26
-  D7 ──[B]──► B    GPIO27
-  GND        ── Cathode (–)
-```
-Use 47–100 Ω resistors on each color pin.
+> **Maximal 9 Nodes + 1 Handy.** Der WLAN-Access-Point des ESP32 lässt
+> höchstens 10 Geräte gleichzeitig zu. Eine 10. Node bekommt keine Verbindung
+> (blinkt gelb).
 
 ---
 
-## Software Setup
+## Software einrichten (einmalig)
 
-### Dependencies
-Install via Arduino Library Manager:
-- **Adafruit NeoPixel** (only if using `LED_NEOPIXEL`)
+1. **Arduino IDE 2.x** installieren.
+2. Boardverwalter: **„esp32 by Espressif Systems“** installieren
+   (getestet mit **3.3.8**; jede 3.3.x sollte gehen).
+3. Bibliotheksverwalter: **„Adafruit NeoPixel“** installieren (mind. 1.12.4).
+4. Unter *Werkzeuge* einstellen (Master **und** Nodes):
+   - Board: **ESP32 Dev Module**
+   - Partition Scheme: **Default 4MB with spiffs (1.2MB APP/1.5MB SPIFFS)**
+     – wichtig: nur damit funktionieren OTA-Updates und das Speichern der
+     Node-Firmware auf dem Master.
 
-### Board Support
-- ESP8266: install *ESP8266 Arduino Core* (Board Manager URL: `http://arduino.esp8266.com/stable/package_esp8266com_index.json`)
-- ESP32: install *ESP32 Arduino Core* (Board Manager URL: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`)
+### Erstes Flashen (per USB)
 
-### Flash the Master
-1. Open `master/master.ino` in Arduino IDE
-2. Select your board (ESP8266 or ESP32)
-3. Flash
+1. `master/master.ino` öffnen → Master anschließen → **Hochladen**.
+2. `node/node.ino` öffnen → jede Node anschließen → **Hochladen**.
+   Alle Nodes bekommen dieselbe Firmware; die Nummern vergibt der Master
+   automatisch und merkt sie sich (pro Node fest, auch nach Neustarts).
 
-### Flash each Node
-1. Open `node/node.ino` in Arduino IDE
-2. In `node/config.h` select your LED type (uncomment one `#define`)
-3. Adjust pin numbers if needed
-4. Flash – all nodes use identical firmware; IDs are assigned at runtime
-
----
-
-## Gameplay
-
-### Starting a game (Serial Monitor, 115200 baud)
-
-Connect to the master's serial port and type:
-
-| Key | Action |
-|-----|--------|
-| `1` | Start **CTF** |
-| `2` | Start **Memory** |
-| `3` | Start **Bomb Defusal** |
-| `0` | Stop current game |
-| `s` | Show status |
+> Nodes mit alter Firmware (1.x) müssen **einmal** per USB auf v2.0 gebracht
+> werden. Danach geht alles per OTA. Das Web-UI zeigt alte Nodes als Warnung an.
 
 ---
 
-### Game 1 – Capture the Flag (CTF)
+## Bedienung
 
-- All nodes start **white** (neutral).
-- **Press** a node → it changes to the next team's color (cycling: White → Red → Blue → White…).
-- Players run around and physically press nodes to capture them for their team.
-- After **3 minutes** the team with the most captured nodes wins.
-- Winner's color flashes on all nodes.
+1. Master einschalten, Nodes einschalten.
+2. Handy mit dem WLAN **„ESP-CTF-Game“** verbinden (ohne Passwort).
+   Tipp: mobile Daten kurz ausschalten, sonst „flüchtet“ manches Handy ins Mobilnetz.
+3. Browser: **http://192.168.4.1**
 
-> Config: `CTF_TEAMS`, `CTF_DURATION_S` in `master/config.h`
+Im Web-UI:
+- **Status**: welche Nodes verbunden sind, mit **Signalstärke** (dBm) und
+  Firmware-Version. **„Finden“** lässt eine Node 5 s weiß blinken, so kann man
+  Nummer und Gerät zuordnen.
+- **Spieler-Namen** je Node (werden gespeichert).
+- **Einstellungen**: Spiel wählen, Optionen, **STARTEN / STOPPEN**.
+- **NODES RECONNECT**: alle Nodes melden sich neu an (Nummern bleiben).
+- **Node-Nummern neu vergeben**: Nummern zurücksetzen (neue Reihenfolge).
+- **Firmware & OTA**: Updates (siehe unten).
 
----
+### Was bedeuten die LEDs einer Node?
 
-### Game 2 – Memory (Pair Matching)
-
-- All nodes briefly flash their hidden color for **2 seconds**, then go dark.
-- Players take turns pressing nodes to reveal them.
-- If two revealed nodes share the same color → **match**! They stay lit green.
-- If they don't match → both go dark after 1.5 s.
-- Game ends when all pairs are found.
-
-> Supports 2–14 nodes (must be even; odd count ignores the last node).
-
----
-
-### Game 3 – Bomb Defusal
-
-- One randomly chosen node becomes the **bomb** (fast red blink).
-- The master reveals the **disarm sequence**: nodes light up one by one in order.
-- Players must press the nodes in that exact order.
-- Pressing the **bomb node** replays the sequence as a hint.
-- Wrong press → **BOOM!** (all nodes flash red).
-- Correct sequence → **DEFUSED!** (all nodes blink green).
-- Timer: **2 minutes**.
-
-> Config: `BOMB_SEQ_LEN`, `BOMB_DURATION_S` in `master/config.h`
+| LED | Bedeutung |
+|---|---|
+| gelb blinkend | sucht WLAN / WLAN-Verbindung verloren |
+| blau langsam blinkend | WLAN ok, aber (noch) nicht beim Master angemeldet |
+| kurzer grüner Blitz, dann grün | angemeldet, bereit |
+| weiß schnell blinkend | „Finden“ wurde im Web-UI gedrückt |
+| lila Fortschrittsbalken | Firmware-Update läuft |
+| rot schnell blinkend (2 s) | Firmware-Update fehlgeschlagen (alte Firmware läuft weiter) |
 
 ---
 
-## Extending
+## OTA-Updates (kabellos)
 
-- **More teams** – change `CTF_TEAMS` (max 4).
-- **More nodes** – change `MAX_NODES` (tested up to 16).
-- **Longer sequences** – change `BOMB_SEQ_LEN`.
-- **Custom colors/brightness** – edit `COLORS[]` in `node.ino` or `strip.setBrightness()`.
+### 1. Firmware-Datei erzeugen
+
+In der Arduino IDE: **Sketch → Kompilierte Binärdatei exportieren**.
+Danach liegt im Sketch-Ordner unter `build/esp32.esp32.esp32/`:
+
+- `node.ino.bin` (bzw. `master.ino.bin`) → **diese Datei verwenden**
+- *nicht* verwenden: `…merged.bin`, `…bootloader.bin`, `…partitions.bin`
+
+### 2. Nodes aktualisieren
+
+Web-UI → **Firmware & OTA** → *Node-Firmware hochladen* → `node.ino.bin` wählen.
+Dann **„Veraltete Nodes aktualisieren“**. Der Master schickt die Firmware
+nacheinander an jede Node (je ca. 15–30 s); der Fortschritt steht im Web-UI.
+Spiele sind währenddessen gesperrt.
+
+### 3. Master aktualisieren
+
+Web-UI → **Firmware & OTA** → *Master-Firmware hochladen* → `master.ino.bin`.
+Der Master startet danach neu (Handy verbindet sich wieder, Seite neu laden).
+
+### Sicherheitsnetz
+
+- Der Master prüft jede hochgeladene Datei: falsche Datei (z. B. Master-Firmware
+  als Node-Firmware, `merged.bin`, `bootloader.bin`) und unpassende
+  Protokollversionen werden mit einer Meldung abgelehnt.
+- Die Nodes prüfen Prüfsumme (MD5) und Image, bevor sie umschalten.
+- **Automatischer Rückfall (Rollback):** Startet eine neue Firmware nicht richtig
+  (Absturz, bevor sie sich beim Master angemeldet hat), schaltet der ESP32 beim
+  nächsten Start automatisch auf die vorherige Firmware zurück.
+
+### Alternative: Arduino IDE über WLAN
+
+PC mit „ESP-CTF-Game“ verbinden → *Werkzeuge → Port* → Netzwerk-Port
+`ctf-master` bzw. `ctf-node-xxxxxx` wählen → Hochladen.
+(Optional mit Passwort: `OTA_PASSWORD` in `config.h`.)
+
+---
+
+## Die Spiele
+
+| # | Spiel | Kurzregel |
+|---|---|---|
+| 1 | Capture the Flag | Node drücken = für dein Team einnehmen (Farbe wechselt). Danach ist die Node für die eingestellte **Sperrdauer** gesperrt (schrumpfender Balken, zu früh drücken = orange). Nach Ablauf der Zeit gewinnt das Team mit den meisten Nodes. |
+| 2 | Memory | Nodes zeigen 2 s ihre Farbe. Zwei gleichfarbige nacheinander drücken = Paar. |
+| 3 | Bombenentschärfung | Rot blinkend = Bombe. Die gezeigte Reihenfolge nachdrücken. Bombe drücken = Reihenfolge nochmal zeigen. |
+| 4 | Reaktion | Eine Node leuchtet gelb – schnell drücken. Reaktionszeit + Bestenliste. |
+| 5 | Simon Says | Jede Node hat eine feste Farbe. Gezeigte Folge nachdrücken; jede Runde einen Schritt länger. |
+| 6 | Heiße Kartoffel | Orange blinkend = du hast die Kartoffel – drücken gibt sie weiter. Wer sie beim Platzen hält, verliert ein Leben. |
+| 7 | King of the Hill | Goldene Node = Thron. Drücken = halten. Der Thron wandert alle 30 s. |
+| 8 | Tauziehen | Erste Hälfte der Nodes = ROT, Rest = BLAU. Jeder Druck zieht den Balken. |
+| 9 | Minesweeper | Manche Nodes sind Minen. Alle sicheren finden, 3 Leben. |
+| 10 | Knockout | Wie Reaktion – wer nach dem ersten Treffer nicht innerhalb der Gnadenfrist drückt, verliert ein Leben. |
+| 11 | Farbjagd | Die erste Node zeigt die Zielfarbe; die Node mit dieser Farbe finden und drücken. |
+| 12 | Whack-a-Mole | Gelbe Node schnell treffen. |
+
+Bei Reaktion, Whack-a-Mole und Knockout gibt es einen einstellbaren
+**Rundenabstand** (Standard 10 s), damit niemand einfach dem Gewinner hinterherläuft.
+
+Es spielen immer die Nodes mit, die **beim Start verbunden** sind.
+
+---
+
+## Einstellungen (`config.h`)
+
+**master/config.h**
+
+| Option | Standard | Bedeutung |
+|---|---|---|
+| `WIFI_SSID` / `WIFI_PASS` | `ESP-CTF-Game` / leer | WLAN des Masters (Passwort mind. 8 Zeichen oder leer) |
+| `WIFI_CHANNEL` | `0` | 0 = beim Start freiesten Kanal (1/6/11) wählen, sonst fester Kanal |
+| `AP_MAX_CONN` | `10` | max. WLAN-Geräte (ESP32: höchstens 10) |
+| `MAX_NODES` | `16` | gespeicherte Node-Nummern |
+| `OTA_PASSWORD` | leer | Passwort für Arduino-IDE-Update über WLAN |
+| `USE_WATCHDOG` / `WDT_TIMEOUT_S` | `1` / `30` | Neustart, falls die Firmware hängt |
+| `CTF_TEAMS`, `CTF_DURATION_S`, `ROUND_DELAY_S`, … | | Spielvorgaben (auch im Web-UI einstellbar) |
+
+**node/config.h**: Pins (`NEO_PIN` = 13, `BUTTON_PIN` = 18), `NEO_COUNT`,
+WLAN-Name (muss zum Master passen), `OTA_PASSWORD`, `USE_WATCHDOG`.
+
+Ältere `config.h`-Kopien funktionieren weiter – fehlende Optionen bekommen
+automatisch Standardwerte.
+
+---
+
+## Fehlersuche
+
+| Problem | Ursache / Lösung |
+|---|---|
+| Node reagiert träge / fällt aus | Signalstärke im Web-UI prüfen (schlechter als ca. −75 dBm = zu weit weg / abgeschirmt). |
+| Web-UI zeigt „Brownout“ bei einer Node | Stromversorgung zu schwach (Kabel, Powerbank) – führt zu Neustarts. |
+| Node blinkt dauerhaft gelb | WLAN nicht gefunden oder Access Point voll (max. 9 Nodes + Handy). |
+| Node blinkt dauerhaft blau | Master nicht erreichbar; „NODES RECONNECT“ drücken. |
+| Warnung „alte Firmware 1.x“ | Diese Node einmal per USB mit `node/node.ino` flashen. |
+| Upload „Datei passt nicht“ | Falsche Datei gewählt – `node.ino.bin` bzw. `master.ino.bin` aus `build/esp32.esp32.esp32/` verwenden. |
+| „Dateisystem nicht verfügbar“ | Partition Scheme „Default 4MB with spiffs“ wählen und Master neu flashen. |
+| Seriell (115200 Baud) | Master: `1`–`9`, `k`, `h`, `w` = Spiel starten, `0` = Stopp, `s` = Status, `r` = Reconnect. |
+
+---
+
+## Was ist neu in v2.0.0?
+
+- **OTA**: Node-Firmware einmal hochladen, der Master verteilt sie; Master-Update im Browser;
+  Dateiprüfung + automatischer Rollback.
+- **Stabilität**:
+  - LED-Befehle und Tastendrücke werden bestätigt und bei Verlust wiederholt.
+  - Node-Nummern hängen fest an der Hardware (MAC) statt an der IP. Kein „Geister-Node“ mehr nach IP-Wechsel.
+  - Größerer Empfangspuffer auf dem Master.
+  - WLAN-Aussetzer kosten keine Anmeldung mehr; eine neu gestartete Node bekommt ihre Spielfarbe zurück.
+  - Watchdog auf Master und Nodes.
+  - Automatische Kanalwahl.
+- **Spiele**: Ziele und Folgen nur noch auf verbundenen Nodes (keine unlösbaren Runden),
+  keine hängenden Runden mehr, CTF zeigt „gesperrt“ jetzt sichtbar an.
+- **Web-UI**: Signalstärke, Firmware-Version, Neustart-Grund (z. B. Brownout) je Node,
+  „Finden“-Knopf, Warnhinweise, Firmware-Karte.
