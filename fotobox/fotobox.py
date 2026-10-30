@@ -13,7 +13,8 @@ Ausloesen ueber gphoto2 (python-gphoto2 falls installiert, sonst gphoto2-Kommand
 Nur Python-Standardbibliothek noetig. Optional:
   Pillow      -> verkleinerte Bilder fuers Tablet (schnelleres Laden)
   gphoto2     -> (pip: gphoto2) dauerhafte Kameraverbindung, schnelleres Ausloesen
-  evdev       -> Bluetooth-Presenter/Fernbedienung als Ausloeser
+  evdev       -> Bluetooth-Presenter/Fernbedienung als Ausloeser (nur Linux;
+                 unter Windows loest die Tablet-Seite selbst per Tastendruck aus)
   gpiozero    -> Taster/Buzzer am Raspberry-Pi-GPIO als Ausloeser
 """
 
@@ -48,15 +49,32 @@ class CameraError(Exception):
     pass
 
 
+# Typische Installationsorte von gphoto2.exe unter Windows (MSYS2)
+MSYS2_DIRS = [r"C:\msys64\ucrt64\bin", r"C:\msys64\mingw64\bin"]
+
+
+def find_gphoto2():
+    exe = shutil.which("gphoto2")
+    if exe:
+        return exe
+    for d in MSYS2_DIRS:
+        cand = Path(d) / "gphoto2.exe"
+        if cand.is_file():
+            return str(cand)
+    return None
+
+
 class Camera:
     """Loest die Kamera aus und speichert das JPEG unter `target`."""
 
     def __init__(self, simulate=False):
         self.simulate = simulate
         self._cam = None
-        if not simulate and gp is None and shutil.which("gphoto2") is None:
-            raise SystemExit("Weder python-gphoto2 noch das Programm 'gphoto2' gefunden. "
-                             "Installation: sudo apt install gphoto2  (oder: pip install gphoto2)")
+        self.gphoto2_exe = None if simulate or gp is not None else find_gphoto2()
+        if not simulate and gp is None and self.gphoto2_exe is None:
+            raise SystemExit("Weder python-gphoto2 noch das Programm 'gphoto2' gefunden.\n"
+                             "Linux: sudo apt install gphoto2\n"
+                             "Windows: MSYS2 + Paket mingw-w64-ucrt-x86_64-gphoto2 (siehe README)")
 
     def capture(self, target: Path):
         if self.simulate:
@@ -84,7 +102,7 @@ class Camera:
                 time.sleep(1)
 
     def _capture_cli(self, target):
-        cmd = ["gphoto2", "--capture-image-and-download",
+        cmd = [self.gphoto2_exe, "--capture-image-and-download",
                "--filename", str(target), "--force-overwrite"]
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
@@ -257,7 +275,12 @@ function overlay(text, small){ ov.textContent=text; ov.className=small?'small':'
   ov.style.display=text?'flex':'none'; }
 fetch('/api/photos').then(r=>r.json()).then(list=>{
   list.forEach(n=>addThumb(n,false)); if(list.length) show(list[0]); });
-document.getElementById('btn').onclick=()=>fetch('/api/trigger',{method:'POST'});
+const trigger=()=>fetch('/api/trigger',{method:'POST'});
+document.getElementById('btn').onclick=trigger;
+// Fernbedienung/Presenter/Buzzer, die sich als Tastatur melden
+const KEYS=__KEYS__;
+document.addEventListener('keydown',e=>{
+  if(KEYS.includes(e.key)){ e.preventDefault(); if(!e.repeat) trigger(); } });
 const es=new EventSource('/events');
 es.onmessage=e=>{
   const ev=JSON.parse(e.data); msg.textContent='';
@@ -270,7 +293,9 @@ es.onmessage=e=>{
 """
 
 
-def make_handler(booth):
+def make_handler(booth, browser_keys):
+    page = PAGE.replace("__KEYS__", json.dumps(browser_keys)).encode()
+
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -284,7 +309,7 @@ def make_handler(booth):
 
         def do_GET(self):
             if self.path == "/":
-                self._send(200, PAGE.encode(), "text/html; charset=utf-8")
+                self._send(200, page, "text/html; charset=utf-8")
             elif self.path == "/api/photos":
                 self._send(200, json.dumps(booth.photos()).encode(), "application/json")
             elif self.path.startswith("/photos/"):
@@ -340,6 +365,8 @@ def main():
     ap.add_argument("--evdev", metavar="GERAET", help="Fernbedienung, z.B. /dev/input/event3")
     ap.add_argument("--keys", default="", help="nur diese Tasten, z.B. KEY_VOLUMEUP,KEY_ENTER")
     ap.add_argument("--gpio", type=int, metavar="PIN", help="GPIO-Pin fuer Buzzer (BCM)")
+    ap.add_argument("--browser-keys", default="Enter, ,PageDown,PageUp,ArrowRight,ArrowLeft,AudioVolumeUp",
+                    help="Tasten, die im Browser ausloesen (JavaScript-Namen, kommagetrennt)")
     ap.add_argument("--simulate", action="store_true", help="ohne Kamera testen")
     args = ap.parse_args()
 
@@ -355,7 +382,8 @@ def main():
     if args.gpio is not None:
         threading.Thread(target=gpio_trigger, args=(booth, args.gpio), daemon=True).start()
 
-    server = ThreadingHTTPServer(("0.0.0.0", args.port), make_handler(booth))
+    handler = make_handler(booth, args.browser_keys.split(","))
+    server = ThreadingHTTPServer(("0.0.0.0", args.port), handler)
     server.daemon_threads = True
     print(f"Fotobox laeuft: http://<IP-dieses-Rechners>:{args.port}  (Bilder: {photo_dir})")
     print("Enter druecken = ausloesen, Strg+C = beenden")

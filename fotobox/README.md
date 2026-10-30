@@ -42,6 +42,40 @@ gphoto2 --auto-detect           # sollte "Sony Alpha-A6000 (Control)" zeigen
 gphoto2 --capture-image-and-download
 ```
 
+## Installation unter Windows (z.B. Windows-Tablet)
+
+Kamera per USB direkt am Tablet, die Fotobox-Seite läuft im Browser desselben Tablets
+(`http://localhost:8000`). Ein Android-Tablet kann zusätzlich als zweite Anzeige über WLAN dienen.
+
+1. **Python** von https://www.python.org/downloads/ installieren, dabei „Add python.exe to PATH“ anhaken.
+   Optional: `py -m pip install pillow` (verkleinerte Bilder).
+2. **MSYS2** von https://www.msys2.org/ installieren (Standardordner `C:\msys64`), dann im Startmenü
+   „MSYS2 UCRT64“ öffnen und eingeben:
+   ```
+   pacman -Syu
+   pacman -S mingw-w64-ucrt-x86_64-gphoto2
+   ```
+   `fotobox.py` findet `C:\msys64\ucrt64\bin\gphoto2.exe` automatisch.
+3. **USB-Treiber**: libgphoto2 funktioniert nicht mit dem Standard-Windows-Treiber, es braucht einen
+   libusb-kompatiblen Treiber. Mit **Zadig** (https://zadig.akeo.ie/):
+   Kamera einschalten, USB-Verbindung = **PC-Fernbedienung**, anstecken → Zadig → *Options → List All Devices*
+   → Sony-Kamera wählen → Treiber **WinUSB** → *Replace Driver*.
+   Hinweis: Im Modus PC-Fernbedienung meldet sich die a6000 mit einer anderen USB-Kennung (054C:094E)
+   als im Massenspeicher-/MTP-Modus (054C:08B7) – laut libgphoto2-Quellcode. Der Treiberwechsel
+   betrifft daher nur den Fernbedienungsmodus.
+4. Test in der „MSYS2 UCRT64“-Konsole: `gphoto2 --auto-detect` und `gphoto2 --capture-image-and-download`.
+5. Den Ordner `fotobox` herunterladen und `start_fotobox.bat` doppelklicken
+   (zum Testen ohne Kamera in einer Eingabeaufforderung: `start_fotobox.bat --simulate`).
+   Bilder landen in `Bilder\Fotobox`. Fragt die Windows-Firewall nach, Zugriff im **privaten** Netzwerk erlauben,
+   damit ein zweites Tablet die Seite über WLAN öffnen kann.
+6. Browser mit **F11** in den Vollbildmodus schalten.
+
+**Fernbedienung unter Windows:** Bluetooth-Presenter oder Buzzer, die sich als Tastatur melden, lösen direkt
+in der Browser-Seite aus. Standardmäßig reagieren Enter, Leertaste, Bild↑/Bild↓, Pfeil links/rechts und
+Lauter-Taste (`--browser-keys` ändert das). Die Browser-Seite muss dafür im Vordergrund sein.
+Ob eine Selfie-Fernbedienung die Lauter-Taste an den Browser durchreicht, ist gerätabhängig –
+ein Presenter (Bild↓) ist die sicherere Wahl.
+
 ## Starten
 
 ```bash
