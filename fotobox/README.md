@@ -44,6 +44,9 @@ gphoto2 --capture-image-and-download
 
 ## Installation unter Windows (z.B. Windows-Tablet)
 
+**Automatisch:** `install_fotobox.bat` doppelklicken. Das Skript installiert Python, MSYS2, gphoto2
+und Pillow und führt dich durch den Treiberwechsel mit Zadig. Die manuellen Schritte:
+
 Kamera per USB direkt am Tablet, die Fotobox-Seite läuft im Browser desselben Tablets
 (`http://localhost:8000`). Ein Android-Tablet kann zusätzlich als zweite Anzeige über WLAN dienen.
 
@@ -103,3 +106,13 @@ Auf dem Tablet die Seite im Vollbild öffnen (Android: Chrome → „Zum Startbi
 | Flugmodus | Ein | WLAN/NFC aus |
 | Speicherkarte | UHS-I U3, in der Kamera formatieren | siehe unten |
 | Fokus | AF-S, oder MF mit festem Abstand | Auslösen schlägt nicht fehl, wenn der AF nichts findet |
+
+## Kamera wird nicht erkannt (`gphoto2 --auto-detect` ist leer)
+
+1. USB-Verbindung im Kameramenü auf **PC-Fernbedienung** stellen (nicht Auto/MTP/Massenspeicher), Kamera **einschalten**.
+2. Echtes **Datenkabel** verwenden – viele Micro-USB-Kabel laden nur.
+3. **Treiber prüfen**: Im Geräte-Manager muss die Kamera nach dem Zadig-Schritt unter
+   „Universal Serial Bus devices“ mit Treiber WinUSB stehen. Hat sich Zadig noch das MTP-Gerät
+   gegriffen, Kamera erst auf PC-Fernbedienung stellen, neu anstecken und Zadig wiederholen.
+4. Den Befehl in der Konsole **„MSYS2 UCRT64“** ausführen, nicht in „MSYS2 MSYS“.
+5. Mehr Details: `gphoto2 --list-ports` und `gphoto2 --debug --auto-detect`.
