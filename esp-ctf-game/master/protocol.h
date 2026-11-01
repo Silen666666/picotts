@@ -10,8 +10,8 @@
 // Firmware-Version (Master und Nodes werden gemeinsam versioniert).
 #define CTF_FW_MAJOR   2
 #define CTF_FW_MINOR   0
-#define CTF_FW_PATCH   0
-#define CTF_FW_VERSION "2.0.0"
+#define CTF_FW_PATCH   1
+#define CTF_FW_VERSION "2.0.1"
 
 // Protokollversion: steht bei PKT_REGISTER im Feld nodeId.
 // Alte Nodes (Firmware 1.x) senden dort 0 -> Master erkennt "alte Firmware".

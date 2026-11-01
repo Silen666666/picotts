@@ -1,4 +1,4 @@
-# ESP CTF Game (v2.0.0)
+# ESP CTF Game (v2.0.1)
 
 Mehrspieler-Bewegungsspiel mit ESP32-„Nodes“ (LED-Leiste + Taster) und einem
 ESP32-„Master“, der ein eigenes WLAN aufspannt und über den Handy-Browser
@@ -181,6 +181,11 @@ automatisch Standardwerte.
 | Seriell (115200 Baud) | Master: `1`–`9`, `k`, `h`, `w` = Spiel starten, `0` = Stopp, `s` = Status, `r` = Reconnect. |
 
 ---
+
+## Was ist neu in v2.0.1?
+
+- Behebt den Arduino-IDE-Fehler „'function' does not name a type“ beim Master: die Web-Oberfläche liegt
+  jetzt in einer eigenen Datei `master/webui.h` (muss im Ordner `master` neben `master.ino` liegen).
 
 ## Was ist neu in v2.0.0?
 
