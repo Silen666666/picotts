@@ -2,29 +2,42 @@
 #include <stdint.h>
 
 // ================================================================
-// ESP CTF Game – gemeinsames Protokoll Master <-> Node
+// ESP CTF Game – gemeinsames Protokoll Master <-> Node  (v3: ESP-NOW)
 // Diese Datei existiert ZWEIMAL (master/protocol.h und node/protocol.h)
 // und muss in beiden Ordnern IDENTISCH sein.
 // ================================================================
 
 // Firmware-Version (Master und Nodes werden gemeinsam versioniert).
-#define CTF_FW_MAJOR   2
+#define CTF_FW_MAJOR   3
 #define CTF_FW_MINOR   0
-#define CTF_FW_PATCH   1
-#define CTF_FW_VERSION "2.0.1"
+#define CTF_FW_PATCH   0
+#define CTF_FW_VERSION "3.0.0"
 
-// Protokollversion: steht bei PKT_REGISTER im Feld nodeId.
-// Alte Nodes (Firmware 1.x) senden dort 0 -> Master erkennt "alte Firmware".
-#define PROTO_VERSION  2
+// Spiel-Protokoll: steht bei PKT_REGISTER im Feld nodeId und bei PKT_ACK in data[1].
+// Unterschiedliche Protokolle -> Node laeuft im "Update-Modus" (nur Firmware-Update).
+#define PROTO_VERSION  3
 
-#define UDP_PORT 4210
+// ================================================================
+// KOMPATIBILITAETSVERTRAG (ab v3 EINGEFROREN – nie mehr aendern!)
+// Damit JEDER kuenftige Master JEDE Node ab v3 per Funk aktualisieren kann:
+//  - Funk:      ESP-NOW auf dem Kanal des Master-WLANs, Nutzlast = CtfFrame (10 Byte)
+//  - Pakete:    PKT_REGISTER, PKT_ACK, PKT_STATUS, PKT_PONG, PKT_RESET,
+//               PKT_IDENTIFY, PKT_OTA, PKT_OTA_STATUS behalten Nummer und Feld-Layout
+//  - Update:    Node verbindet sich mit dem Master-WLAN (WIFI_SSID/WIFI_PASS) und laedt
+//               http://192.168.4.1/fw/node.bin  (HTTP/1.0, Content-Length, optional x-MD5)
+//  - Datei:     CtfFwDesc bei .bin-Offset 0x120 mit otaCompat == OTA_COMPAT
+// Neue Spiel-Funktionen duerfen NEUE Pakettypen bekommen (>= 0x10) oder das
+// Spiel-Protokoll (PROTO_VERSION) erhoehen – OTA_COMPAT bleibt 1.
+// ================================================================
+#define OTA_COMPAT     1
+
+#define UDP_PORT 4210          // nur noch zum Erkennen alter v1/v2-Nodes (die per WLAN/UDP funken)
 
 // ----------------------------------------------------------------
 // Firmware-Kennung im .bin (fuer OTA-Pruefung)
 // Jede Firmware legt eine CtfFwDesc in die Section ".rodata_custom_desc".
-// Bei Arduino-ESP32 3.3.x liegt sie im .bin bei Offset 0x120 (direkt hinter
-// esp_app_desc_t bei 0x20). Der Master prueft hochgeladene Dateien damit:
-// richtige Rolle (Node/Master), passendes Protokoll, Versionsnummer.
+// Bei Arduino-ESP32 3.3.x liegt sie im .bin bei Offset 0x120. WICHTIG: der Linker
+// behaelt sie nur, wenn der Code sie benutzt (z.B. Version beim Start ausgeben).
 // ----------------------------------------------------------------
 #define CTF_DESC_MAGIC    0x44465443UL   // Bytes 'C','T','F','D'
 #define CTF_DESC_OFFSET   0x120
@@ -35,68 +48,82 @@
 struct CtfFwDesc {
   uint32_t magic;        // CTF_DESC_MAGIC
   uint8_t  role;         // CTF_ROLE_*
-  uint8_t  proto;        // PROTO_VERSION
+  uint8_t  proto;        // PROTO_VERSION (Spiel-Protokoll)
   uint8_t  major, minor, patch;
-  uint8_t  reserved[3];
+  uint8_t  otaCompat;    // OTA_COMPAT (v2: war reserved[0] = 0)
+  uint8_t  reserved[2];
   char     version[16];  // CTF_FW_VERSION, 0-terminiert
 };
 
 // ----------------------------------------------------------------
-// Pakete – IMMER genau 8 Byte: type, nodeId, data[6]
-// (Pakete anderer Groesse werden verworfen. Alte 1.x-Firmware versteht
-//  ebenfalls nur 8-Byte-Pakete – nie groessere Pakete senden!)
-// N->M = Node an Master, M->N = Master an Node
+// Funkrahmen (ESP-NOW-Nutzlast): IMMER genau 10 Byte = 2 Byte Kennung + Packet
+// Rahmen anderer Laenge oder mit falscher Kennung werden verworfen
+// (fremde ESP-NOW-Geraete in der Naehe).
 // ----------------------------------------------------------------
-#define PKT_REGISTER   0x01  // N->M  nodeId=PROTO_VERSION, data[0..5]=STA-MAC der Node
-#define PKT_ACK        0x02  // M->N  nodeId=ID, data[0]=ID, data[1]=PROTO_VERSION,
-                              //        data[2..5]=MAC[2..5] der Node (Node prueft, ob sie gemeint ist)
+#define CTF_FRAME_MAGIC0  0x43   // 'C'
+#define CTF_FRAME_MAGIC1  0x54   // 'T'
+
+struct Packet {
+  uint8_t type;
+  uint8_t nodeId;
+  uint8_t data[6];
+};
+
+struct CtfFrame {
+  uint8_t magic[2];      // CTF_FRAME_MAGIC0, CTF_FRAME_MAGIC1
+  Packet  p;
+};
+
+// ----------------------------------------------------------------
+// Pakete   (N->M = Node an Master, M->N = Master an Node)
+// Adressierung: Master sendet an die STA-MAC der Node (= ihre Kennung),
+// Node sendet an die AP-MAC des Masters (BSSID aus dem WLAN-Scan).
+// ----------------------------------------------------------------
+#define PKT_REGISTER   0x01  // N->M  nodeId=PROTO_VERSION der Node, data[0..5]=STA-MAC der Node        [EINGEFROREN]
+#define PKT_ACK        0x02  // M->N  nodeId=ID, data[0]=ID, data[1]=PROTO_VERSION des Masters,
+                              //        data[2..5]=MAC[2..5] der Node                                      [EINGEFROREN]
+                              //        Protokolle gleich -> Spielbetrieb; verschieden -> Update-Modus.
 #define PKT_BUTTON     0x03  // N->M  nodeId=ID, data[0]=Druck-Seq (1..255), data[1]=Sitzungs-Nonce (1..255)
-#define PKT_SET_LED    0x04  // M->N  nodeId=ID, data[0]=Farbe, data[1]=Animation,           data[5]=LED-Seq
-#define PKT_GAME_START 0x05  // (reserviert)
-#define PKT_GAME_OVER  0x06  // (reserviert)
-#define PKT_STATUS     0x07  // N->M  nodeId=ID, data[0]=zuletzt angewendete LED-Seq,
-                              //        data[1]=RSSI (int8 als uint8), data[2..4]=FW major/minor/patch,
-                              //        data[5]: Bit0..3 = NODE_FLAG_*, Bit4..7 = Reset-Grund (esp_reset_reason)
-                              //        Gesendet alle 2 s und sofort nach jedem LED-Befehl.
+#define PKT_SET_LED    0x04  // M->N  data[0]=Farbe, data[1]=Animation,                 data[5]=LED-Seq
+#define PKT_STATUS     0x07  // N->M  nodeId=ID, data[0]=angewendete LED-Seq, data[1]=RSSI des Masters (int8),
+                              //        data[2..4]=FW major/minor/patch, data[5]: Bit0..3 NODE_FLAG_*,
+                              //        Bit4..7 Reset-Grund. Alle 2 s + nach jedem LED-Befehl.            [EINGEFROREN]
 #define PKT_SET_BAR    0x08  // M->N  data[0]=Farbe, data[1]=Anzahl(0-8), data[2]=Hintergrund, data[5]=LED-Seq
 #define PKT_SET_SPLIT  0x09  // M->N  data[0]=FarbeA, data[1]=AnzahlA(0-8), data[2]=FarbeB,   data[5]=LED-Seq
-#define PKT_RESET      0x0A  // M->N  nodeId=0xFF (alle) oder ID: ID verwerfen, nach Zufallspause neu registrieren
+#define PKT_RESET      0x0A  // M->N  nodeId=0xFF, data[0..5]=Ziel-MAC (alles 0 = alle Nodes):
+                              //        ID verwerfen, nach Zufallspause neu registrieren                  [EINGEFROREN]
 #define PKT_BTN_ACK    0x0B  // M->N  nodeId=ID, data[0]=bestaetigte Druck-Seq, data[1]=Nonce
-#define PKT_IDENTIFY   0x0C  // M->N  nodeId=ID, data[0]=Sekunden (0 -> 3, max 10): Node blinkt weiss
-#define PKT_OTA        0x0D  // M->N  nodeId=ID, data[0..3]=Firmware-Groesse (uint32 LE):
-                              //        Node laedt http://<MASTER_IP>/fw/node.bin und flasht sich
-#define PKT_OTA_STATUS 0x0E  // N->M  nodeId=ID, data[0]=OTA_ST_*, data[1]=Fortschritt %, data[2]=OTA_ERR_*
-#define PKT_PONG       0x0F  // M->N  Antwort auf PKT_STATUS: nodeId=ID, data[0]=aktuelle Soll-LED-Seq
-                              //        (Node erkennt so, dass der Master noch erreichbar ist)
+#define PKT_IDENTIFY   0x0C  // M->N  nodeId=ID, data[0]=Sekunden (0 -> 3, max 10): Node blinkt weiss    [EINGEFROREN]
+#define PKT_OTA        0x0D  // M->N  nodeId=ID, data[0..3]=Firmware-Groesse (uint32 LE), data[4]=WLAN-Kanal:
+                              //        Node verbindet sich mit dem Master-WLAN und laedt
+                              //        http://192.168.4.1/fw/node.bin                                     [EINGEFROREN]
+#define PKT_OTA_STATUS 0x0E  // N->M  nodeId=ID, data[0]=OTA_ST_*, data[1]=Fortschritt %, data[2]=OTA_ERR_* [EINGEFROREN]
+#define PKT_PONG       0x0F  // M->N  Antwort auf PKT_STATUS: nodeId=ID, data[0]=aktuelle Soll-LED-Seq      [EINGEFROREN]
+// Neue Pakettypen ab 0x10.
 
-// LED-Sequenznummer (data[5] bei SET_LED/SET_BAR/SET_SPLIT):
+// LED-Sequenznummer (data[5] bei SET_LED/SET_BAR/SET_SPLIT): wie v2
 //  - Master zaehlt je Node 1..255 (0 wird uebersprungen) bei jeder Aenderung des Soll-Zustands.
-//  - Node wendet einen Befehl nur an, wenn seq != zuletzt angewendete seq,
-//    und meldet die angewendete seq sofort per PKT_STATUS zurueck (= Quittung).
-//  - Doppelte Pakete (gleiche seq) werden nicht erneut angewendet, aber erneut quittiert.
-//  - Master wiederholt den Soll-Zustand (mit Backoff), bis die Node ihn quittiert.
-//  - Nach (Neu-)Registrierung: Node setzt angewendete seq = 0, Master sendet den
-//    Soll-Zustand erneut -> Node zeigt nach Neustart/WLAN-Ausfall wieder die richtige Farbe.
-
-// Tastendruck-Zustellung:
-//  - Node: seq = 1..255 (0 nie), Nonce = Zufallswert 1..255, neu gewuerfelt bei jeder Registrierung.
-//  - Node sendet einmal und wiederholt mit wachsendem Abstand, bis PKT_BTN_ACK(seq, nonce) kommt.
-//  - Master quittiert JEDES Button-Paket, verarbeitet aber nur neue (Nonce neu oder seq neu).
+//  - Node wendet nur an, wenn seq != zuletzt angewendete seq, und quittiert per PKT_STATUS.
+//  - Master wiederholt den Soll-Zustand, bis die Node ihn quittiert.
+//  - Nach (Neu-)Registrierung: angewendete seq = 0 -> Master sendet den Soll-Zustand erneut.
+// Tastendruck: wie v2 (Seq 1..255, Nonce neu je Registrierung und immer != vorige,
+//  senden + Wiederholung bis PKT_BTN_ACK; Master quittiert JEDES Button-Paket).
 
 // NODE_FLAG_* (PKT_STATUS data[5], Bit 0..3)
 #define NODE_FLAG_OTA_BUSY    0x01  // Node laedt gerade Firmware
 #define NODE_FLAG_OTA_FAILED  0x02  // letzter OTA-Versuch fehlgeschlagen
 #define NODE_FLAG_IDENTIFY    0x04  // Node blinkt gerade zur Identifikation
+#define NODE_FLAG_UPDATE_ONLY 0x08  // Node ist im Update-Modus (Protokoll passt nicht zum Master)
 #define NODE_FLAG_MASK        0x0F
-// Reset-Grund (PKT_STATUS data[5] >> 4) = esp_reset_reason_t:
-//  1=Einschalten 2=Reset-Pin 3=Software 4=Absturz 5=Int-Watchdog 6=Task-Watchdog
-//  7=Watchdog 8=Deep-Sleep 9=Brownout (Stromversorgung zu schwach!)
+// Reset-Grund (data[5] >> 4) = esp_reset_reason_t: 1=Einschalten 3=Software 4=Absturz
+//  5/6/7=Watchdog 9=Brownout (Stromversorgung zu schwach!)
 
 // OTA_ST_* (PKT_OTA_STATUS data[0])
 #define OTA_ST_STARTED   1
 #define OTA_ST_PROGRESS  2
 #define OTA_ST_FAILED    3
 #define OTA_ST_SUCCESS   4   // geflasht, Node startet gleich neu
+#define OTA_ST_WIFI      5   // verbindet sich gerade mit dem Master-WLAN
 
 // OTA-Fehlercodes (PKT_OTA_STATUS data[2])
 #define OTA_ERR_NONE       0
@@ -107,8 +134,9 @@ struct CtfFwDesc {
 #define OTA_ERR_DOWNLOAD   5   // Download abgebrochen / Timeout
 #define OTA_ERR_WRITE      6   // Schreiben in den Flash fehlgeschlagen
 #define OTA_ERR_VERIFY     7   // Update.end(): MD5/Image-Pruefung fehlgeschlagen
-#define OTA_ERR_BUSY       8   // Node ist nicht bereit / nicht unterstuetzt
+#define OTA_ERR_BUSY       8   // Node ist nicht bereit
 #define OTA_ERR_IMAGE      9   // Datei ist keine passende Node-Firmware
+#define OTA_ERR_WIFI      10   // Master-WLAN nicht erreichbar (voll? Passwort falsch?)
 
 // Colors (index into COLORS[] on the node)
 #define COL_OFF     0
@@ -146,9 +174,3 @@ struct CtfFwDesc {
 #define GAME_KNOCKOUT    10
 #define GAME_COLORHUNT   11
 #define GAME_WHACKAMOLE  12
-
-struct Packet {
-  uint8_t type;
-  uint8_t nodeId;
-  uint8_t data[6];
-};

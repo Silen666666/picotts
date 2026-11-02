@@ -2,7 +2,8 @@
 // Web-Oberflaeche des Masters (HTML + JavaScript).
 // Liegt bewusst in einer .h-Datei: die Arduino IDE sucht in .ino-Dateien automatisch nach
 // Funktionen (ctags) und haelt sonst die JavaScript-"function"s fuer C++ -> Compilerfehler
-// "'function' does not name a type".
+// "'function' does not name a type". Wird in master.ino NACH config.h eingebunden
+// (MASTER_IS_NODE steuert Teile der Seite).
 #include <Arduino.h>
 
 const char INDEX_HTML[] PROGMEM = R"rawliteral(
@@ -83,6 +84,10 @@ summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6p
 .cnchip .dot{width:22px;height:22px;border-radius:50%;border:1px solid #00000055;margin-bottom:4px}
 .cnchip .lbl{font-size:.72rem;color:#c9d1d9;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cnchip.off{opacity:.45}
+.pupd{font-size:.68rem;font-weight:700;background:#2a1a4a;color:#d2a8ff;border:1px solid #a371f7;border-radius:10px;padding:1px 6px;flex-shrink:0}
+.nd.upd{background:#2a1a4a;border-color:#a371f7;color:#d2a8ff}
+.box{border:1px solid #30363d;border-radius:10px;padding:10px 12px;margin:10px 0;background:#0d1117}
+.box b{color:#a8dadc}
 </style></head>
 <body>
 <h1>&#127918; ESP CTF Game</h1>
@@ -229,22 +234,37 @@ summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6p
   <h2>&#128190; Firmware &amp; OTA</h2>
   <div class="row"><span>Master-Firmware</span><strong id="mFw">-</strong></div>
   <div class="row"><span>Letzter Neustart</span><span id="mRst">-</span></div>
-  <div id="mUpSec" class="hidden">
+  <div class="row"><span>WLAN-Kanal</span><span id="chInfo">-</span></div>
+  <button class="btn btn-grey btn-small" id="chBtn" onclick="rechannel()">&#128246; WLAN-Kanal neu w&auml;hlen</button>
+  <div class="fwmsg" id="chMsg"></div>
+  <div id="aBox" class="box hidden">
+    <b>&#9889; Alles aktualisieren</b>
+    <label>Master-Firmware (master.ino.bin) &ndash; leer lassen = Master bleibt</label>
+    <input type="file" id="aMFile" accept=".bin">
+    <label>Node-Firmware (node.ino.bin) &ndash; leer lassen = gespeicherte verwenden</label>
+    <input type="file" id="aNFile" accept=".bin">
+    <button class="btn btn-start" id="aUpBtn" onclick="oneClick()">&#11014; Alles aktualisieren</button>
+    <div class="prog hidden"><div id="aBar"></div></div>
+    <div class="fwmsg" id="aMsg"></div>
+    <div class="sub">Ablauf: Node-Firmware speichern &rarr; Master aktualisieren und neu starten &rarr; danach werden alle veralteten Nodes automatisch nacheinander aktualisiert. Nodes bitte eingeschaltet lassen.</div>
+  </div>
+  <details id="advSec" class="hidden">
+    <summary>Einzeln hochladen (f&uuml;r Fortgeschrittene)</summary>
     <label>Master aktualisieren (master.ino.bin)</label>
     <input type="file" id="mFile" accept=".bin">
     <button class="btn btn-save" id="mUpBtn" onclick="upMaster()">&#11014; Master-Firmware hochladen</button>
     <div class="prog hidden"><div id="mBar"></div></div>
     <div class="fwmsg" id="mMsg"></div>
-  </div>
-  <div id="fwNodeSec" class="hidden">
-    <hr>
-    <div class="row"><span>Gespeicherte Node-Firmware</span><strong id="nFw">keine</strong></div>
-    <div class="sub" id="fsInfo"></div>
     <label>Node-Firmware speichern (node.ino.bin)</label>
     <input type="file" id="nFile" accept=".bin">
     <button class="btn btn-save" id="nUpBtn" onclick="upNode()">&#11014; Node-Firmware hochladen</button>
     <div class="prog hidden"><div id="nBar"></div></div>
     <div class="fwmsg" id="nMsg"></div>
+  </details>
+  <div id="fwNodeSec" class="hidden">
+    <hr>
+    <div class="row"><span>Gespeicherte Node-Firmware</span><strong id="nFw">keine</strong></div>
+    <div class="sub" id="fsInfo"></div>
     <button class="btn btn-start" id="roBtn1" onclick="rollout(0)">&#128260; Veraltete Nodes aktualisieren</button>
     <button class="btn btn-reset" id="roBtn2" onclick="rollout(1)">&#9889; Alle Nodes neu flashen</button>
     <button class="btn btn-stop" id="roCancel" onclick="roStop()">&#9632; Abbrechen</button>
@@ -255,7 +275,7 @@ summary{cursor:pointer;color:#a8dadc;font-size:.88rem;font-weight:600;padding:6p
   </div>
   <details>
     <summary>&#8505; Welche Datei?</summary>
-    <div class="instr">Arduino IDE &rarr; <b>Sketch &rarr; Kompilierte Bin&auml;rdatei exportieren</b>. Danach liegt im Sketch-Ordner unter <b>build/esp32.esp32.esp32/</b> die Datei <b>node.ino.bin</b> bzw. <b>master.ino.bin</b> &ndash; genau diese hochladen.<br>NICHT verwenden: <i>.merged.bin</i>, <i>.bootloader.bin</i>, <i>.partitions.bin</i>.<br>Ablauf Nodes: Node-Firmware hochladen &rarr; &bdquo;Veraltete Nodes aktualisieren&ldquo;. Die Nodes laden die Datei nacheinander vom Master und starten neu. Nodes mit alter Firmware 1.x m&uuml;ssen einmal per USB geflasht werden.</div>
+    <div class="instr">Arduino IDE &rarr; <b>Sketch &rarr; Kompilierte Bin&auml;rdatei exportieren</b>. Danach liegt im Sketch-Ordner unter <b>build/esp32.esp32.esp32/</b> die Datei <b>node.ino.bin</b> bzw. <b>master.ino.bin</b> &ndash; genau diese hochladen.<br>NICHT verwenden: <i>.merged.bin</i>, <i>.bootloader.bin</i>, <i>.partitions.bin</i>.<br>Am einfachsten: beide Dateien oben bei &bdquo;Alles aktualisieren&ldquo; ausw&auml;hlen und einmal klicken. Die Nodes verbinden sich zum Laden kurz mit dem Master-WLAN, laden die Datei nacheinander und starten neu. Nodes im <b>Update-Modus</b> (lila Blinken) passen nicht zum Master und werden dabei mit aktualisiert. Nodes mit alter Firmware v1/v2 m&uuml;ssen einmal per USB geflasht werden.</div>
   </details>
 </div>
 
@@ -264,13 +284,14 @@ var modeNames=['Idle','CTF','Memory','Bomb','Reaktion','Simon Says','Heisse Kart
 var tc=['#8b949e','#f85149','#388bfd','#3fb950','#e3b341'];
 var knownNodes=-1;
 var RST=['?','Einschalten','Reset-Taste','Software-Neustart','Absturz','Interrupt-Watchdog','Task-Watchdog','Watchdog','Deep-Sleep','Brownout','SDIO','USB','JTAG','eFuse','Spannungseinbruch','CPU-Lockup'];
-var OERR={1:'keine Verbindung zum Master',2:'HTTP-Fehler',3:'Dateigroesse ungueltig',4:'Flash-Start fehlgeschlagen',5:'Download abgebrochen',6:'Schreibfehler',7:'Pruefung fehlgeschlagen',8:'Node nicht bereit',9:'Firmware passt nicht',20:'keine Antwort',21:'Zeitueberschreitung',22:'offline',23:'nach Neustart alte Version'};
+var OERR={1:'keine Verbindung zum Master',2:'HTTP-Fehler',3:'Dateigroesse ungueltig',4:'Flash-Start fehlgeschlagen',5:'Download abgebrochen',6:'Schreibfehler',7:'Pruefung fehlgeschlagen',8:'Node nicht bereit',9:'Firmware passt nicht',10:'Master-WLAN nicht erreichbar',20:'keine Antwort',21:'Zeitueberschreitung',22:'offline',23:'nach Neustart alte Version',24:'WLAN voll'};
 
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 function rstPower(r){return r==9||r==14;}
 function rstCrash(r){return r==4||r==5||r==6||r==7||r==15;}
 function rstWarn(r){if(rstPower(r))return (RST[r]||r)+' – Stromversorgung pruefen!';if(rstCrash(r))return 'Absturz/Watchdog ('+(RST[r]||r)+')';return '';}
-function sig(r){var l=r>=-55?4:r>=-65?3:r>=-75?2:r>=-85?1:0,h='<span class="sig" title="'+r+' dBm">';for(var i=1;i<=4;i++)h+='<i'+(i<=l?' class="f"':'')+' style="height:'+(i*3)+'px"></i>';return h+'</span><span class="pstat">'+r+'</span>';}
+// r = Empfang beim Master, rn = Empfang laut Node (dBm)
+function sig(r,rn){if(!r)return '<span class="pstat">?</span>';var l=r>=-55?4:r>=-65?3:r>=-75?2:r>=-85?1:0,h='<span class="sig" title="Master empf&auml;ngt '+r+' dBm'+(rn?', Node empf&auml;ngt '+rn+' dBm':'')+'">';for(var i=1;i<=4;i++)h+='<i'+(i<=l?' class="f"':'')+' style="height:'+(i*3)+'px"></i>';return h+'</span><span class="pstat">'+r+'</span>';}
 function dis(id,v){var e=document.getElementById(id);if(e)e.disabled=!!v;}
 
 var instrs={
@@ -343,7 +364,7 @@ function ident(id){act('/identify','id='+id);}
 
 function saveNames(){
   var q='';
-  for(var i=1;i<=16;i++){var el=document.getElementById('n'+i);if(el)q+='&n'+i+'='+encodeURIComponent(el.value||'');}
+  for(var i=1;i<=32;i++){var el=document.getElementById('n'+i);if(el)q+='&n'+i+'='+encodeURIComponent(el.value||'');}
   post('/names',q.slice(1)).then(function(){var b=document.getElementById('namesBtn');b.textContent='✓ Gespeichert';setTimeout(function(){b.innerHTML='&#128190; Speichern';},1500);});
 }
 
@@ -371,7 +392,7 @@ function renderNodes(nl,mfw){
     var r=rows[n.id];
     if(!r){
       r=document.createElement('div');
-      r.innerHTML='<div class="pl"><span class="pdot"></span><span class="pname"></span><span class="psig"></span><span class="pfw"></span><button class="fbtn" onclick="ident('+n.id+')">Finden</button></div><div class="pnote hidden"></div>';
+      r.innerHTML='<div class="pl"><span class="pdot"></span><span class="pname"></span><span class="pupd hidden" title="Firmware passt nicht zum Master (Update-Modus) &ndash; unten aktualisieren">Update n&ouml;tig</span><span class="psig"></span><span class="pfw"></span><button class="fbtn" onclick="ident('+n.id+')">Finden</button></div><div class="pnote hidden"></div>';
       rows[n.id]=r;
     }
     seen[n.id]=1;
@@ -379,11 +400,19 @@ function renderNodes(nl,mfw){
     pl.className='pl'+(n.on?'':' dead');
     c[0].className='pdot '+(n.on?'on':'off');
     c[1].textContent=n.id+'. '+n.name;
-    var sh=n.on?sig(n.rssi):'<span class="pstat">offline</span>';
-    if(c[2]._h!==sh){c[2].innerHTML=sh;c[2]._h=sh;}
+    c[2].className='pupd'+(n.upd?'':' hidden');
+)rawliteral"
+#if MASTER_IS_NODE
+R"rawliteral(    var sh=n.on?(n.local?'<span class="pstat" title="Taster und LEDs direkt am Master (lokal)">Master</span>':sig(n.rssi,n.rssiN)):'<span class="pstat">offline</span>';
+)rawliteral"
+#else
+R"rawliteral(    var sh=n.on?sig(n.rssi,n.rssiN):'<span class="pstat">offline</span>';
+)rawliteral"
+#endif
+R"rawliteral(    if(c[3]._h!==sh){c[3].innerHTML=sh;c[3]._h=sh;}
     var bad=!!(n.fw&&n.fw!==mfw);
-    c[3].className='pfw'+(bad?' bad':'');c[3].textContent=n.fw||'';c[3].title=bad?'andere Firmware als der Master ('+mfw+')':'Firmware';
-    c[4].disabled=!n.on;
+    c[4].className='pfw'+(bad?' bad':'');c[4].textContent=n.fw||'';c[4].title=bad?'andere Firmware als der Master ('+mfw+')':'Firmware';
+    c[5].disabled=!n.on;
     var w=rstWarn(n.rst),pn=r.lastChild;
     pn.className='pnote'+(w?'':' hidden')+(rstPower(n.rst)?' red':'');
     pn.textContent=w?('⚠ Letzter Neustart: '+w):'';
@@ -394,38 +423,106 @@ function renderNodes(nl,mfw){
 
 function renderBanners(d,nl){
   var b=[];
-  if(d.legacy&&d.legacy.length)b.push(['','Node(s) mit alter Firmware 1.x gefunden ('+d.legacy.map(esc).join(', ')+') &ndash; einmal per USB mit der neuen Node-Firmware flashen.']);
-  if(d.apMax&&d.stations>=d.apMax)b.push(['red','WLAN voll: max. '+(d.apMax-1)+' Nodes + 1 Handy. Weitere Ger&auml;te k&ouml;nnen sich nicht verbinden.']);
+  if(d.espnow===false)b.push(['red','Funk (ESP-NOW) konnte nicht gestartet werden &ndash; Master bitte neu starten (Strom kurz trennen).']);
+  if(d.legacy&&d.legacy.length)b.push(['','Node(s) mit alter Firmware v1/v2 im WLAN ('+d.legacy.map(esc).join(', ')+') &ndash; diese funken nicht per ESP-NOW und belegen WLAN-Pl&auml;tze. Einmal per USB mit der neuen node.ino flashen.']);
+  if(d.apMax&&d.stations>=d.apMax)b.push(['red','WLAN voll ('+d.stations+' Ger&auml;te) &ndash; Nodes k&ouml;nnen sich zum Aktualisieren nicht verbinden. Alte v1/v2-Nodes oder &uuml;berz&auml;hlige Handys trennen.']);
   var pw=[];nl.forEach(function(n){if(rstPower(n.rst))pw.push(n.id);});
   if(pw.length)b.push(['red','Brownout bei Node '+pw.join(', ')+' &ndash; Stromversorgung pr&uuml;fen (Netzteil, Kabel, Akku).']);
   if(rstPower(d.masterRst))b.push(['red','Master wurde wegen Unterspannung neu gestartet &ndash; Stromversorgung pr&uuml;fen!']);
-  var od=[];nl.forEach(function(n){if(n.on&&n.fw&&n.fw!==d.masterFw)od.push(n.id);});
+  var up=[];nl.forEach(function(n){if(n.on&&n.upd)up.push(n.id);});
+  if(up.length)b.push(['','Node '+up.join(', ')+' im Update-Modus (Firmware passt nicht zum Master, spielt nicht mit) &ndash; unten &bdquo;Veraltete Nodes aktualisieren&ldquo;.']);
+  var od=[];nl.forEach(function(n){if(n.on&&!n.upd&&n.fw&&n.fw!==d.masterFw)od.push(n.id);});
   if(od.length)b.push(['','Node '+od.join(', ')+' mit anderer Firmware als der Master ('+esc(d.masterFw)+') &ndash; unten unter &bdquo;Firmware &amp; OTA&ldquo; aktualisieren.']);
   if(d.rollout&&d.rollout.active)b.push(['','Firmware-Update der Nodes l&auml;uft &ndash; Spiele sind solange gesperrt.']);
+  else if(d.rollout&&d.rollout.autoIn>0)b.push(['','Nodes werden in '+d.rollout.autoIn+' s automatisch aktualisiert &ndash; bitte noch kein Spiel starten.']);
   var h=b.map(function(x){return '<div class="warn '+x[0]+'">&#9888; '+x[1]+'</div>';}).join('');
   var el=document.getElementById('banners');if(el._h!==h){el.innerHTML=h;el._h=h;}
 }
 
 var upBusy=false;
-function upLock(v){['mUpBtn','nUpBtn','roBtn1','roBtn2','fwDel'].forEach(function(i){dis(i,v);});}
+function upLock(v){['mUpBtn','nUpBtn','aUpBtn','roBtn1','roBtn2','fwDel','chBtn'].forEach(function(i){dis(i,v);});}
+function upDone(){upBusy=false;stBusy=0;updateStatus();}   // Knoepfe sofort wieder richtig setzen
+function binBad(f,m){
+  if(!/merged|bootloader|partitions/i.test(f.name))return false;
+  m.className='fwmsg err';m.textContent='Falsche Datei ('+f.name+'): bitte die <sketch>.ino.bin verwenden, nicht .merged/.bootloader/.partitions.bin.';return true;}
+// Datei per XHR hochladen (mit Fortschritt); cb(r), r={ok,msg,version}
+function xhrUp(url,f,bar,m,pre,cb){
+  bar.parentNode.classList.remove('hidden');bar.style.width='0%';
+  m.className='fwmsg';m.textContent=pre+'Lade hoch...';
+  var fd=new FormData();fd.append('firmware',f,f.name);
+  var x=new XMLHttpRequest();x.open('POST',url,true);
+  x.upload.onprogress=function(e){if(e.lengthComputable){var p=Math.round(e.loaded*100/e.total);bar.style.width=p+'%';m.textContent=pre+(p<100?('Lade hoch... '+p+' %'):'Wird geprueft...');}};
+  x.onload=function(){var r;try{r=JSON.parse(x.responseText);}catch(e){r={ok:false,msg:'Unerwartete Antwort (HTTP '+x.status+')'};}
+    m.className='fwmsg'+(r.ok?'':' err');m.textContent=pre+(r.msg||'');if(!r.ok)bar.style.width='0%';cb(r);};
+  x.onerror=function(){m.className='fwmsg err';m.textContent=pre+'Verbindung abgebrochen.';bar.style.width='0%';cb({ok:false});};
+  x.send(fd);
+}
+// Einzel-Upload. cb(r) liefert true, wenn die Sperre bleiben soll (Master startet neu)
 function upFile(url,fileId,barId,msgId,cb){
   if(upBusy)return;                                   // kein zweiter Upload parallel (Doppelklick)
   var inp=document.getElementById(fileId),f=inp.files&&inp.files[0],m=document.getElementById(msgId);
   if(!f){m.className='fwmsg err';m.textContent='Bitte zuerst eine .bin-Datei auswaehlen.';return;}
-  if(/merged|bootloader|partitions/i.test(f.name)){m.className='fwmsg err';m.textContent='Falsche Datei ('+f.name+'): bitte die <sketch>.ino.bin verwenden, nicht .merged/.bootloader/.partitions.bin.';return;}
-  var bar=document.getElementById(barId);bar.parentNode.classList.remove('hidden');bar.style.width='0%';
-  m.className='fwmsg';m.textContent='Lade hoch...';upBusy=true;upLock(true);
-  var fd=new FormData();fd.append('firmware',f,f.name);
-  var x=new XMLHttpRequest();x.open('POST',url,true);
-  x.upload.onprogress=function(e){if(e.lengthComputable){var p=Math.round(e.loaded*100/e.total);bar.style.width=p+'%';m.textContent=p<100?('Lade hoch... '+p+' %'):'Wird geprueft...';}};
-  x.onload=function(){upBusy=false;var r;try{r=JSON.parse(x.responseText);}catch(e){r={ok:false,msg:'Unerwartete Antwort (HTTP '+x.status+')'};}
-    m.className='fwmsg'+(r.ok?'':' err');m.textContent=r.msg||'';if(!r.ok)bar.style.width='0%';if(cb)cb(r);
-    if(!upBusy){stBusy=0;updateStatus();}};             // Knoepfe sofort wieder richtig setzen (nicht beim Master-Neustart)
-  x.onerror=function(){upBusy=false;m.className='fwmsg err';m.textContent='Verbindung abgebrochen.';bar.style.width='0%';stBusy=0;updateStatus();};
-  x.send(fd);
+  if(binBad(f,m))return;
+  upBusy=true;upLock(true);
+  xhrUp(url,f,document.getElementById(barId),m,'',function(r){if(!(cb&&cb(r)))upDone();});
 }
-function upMaster(){upFile('/update?json=1','mFile','mBar','mMsg',function(r){if(r.ok){upBusy=true;document.getElementById('mMsg').textContent=r.msg+' Seite wird in 10 s neu geladen.';setTimeout(function(){location.reload();},10000);}});}
+// Nach Master-Update / Kanalwechsel: warten, bis der NEU GESTARTETE Master antwortet (max. ~60 s), dann neu laden
+function waitMaster(ver,m,pre){
+  var t0=Date.now();
+  m.className='fwmsg';m.textContent=pre+'Warte auf den Master...';
+  function next(){
+    if(Date.now()-t0>60000){m.className='fwmsg err';m.textContent=pre+'Master antwortet nicht. Handy wieder mit dem Spiel-WLAN verbinden und die Seite neu laden.';upDone();return;}
+    setTimeout(poll,2000);}
+  function poll(){
+    var done=false;
+    var to=setTimeout(function(){if(!done){done=true;next();}},3000);
+    fetch('/status',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){
+      if(done)return;done=true;clearTimeout(to);
+      if(d.uptime*1000>Date.now()-t0+1000){next();return;}   // noch der alte Lauf (Neustart folgt gleich)
+      if(ver&&d.masterFw!==ver){m.className='fwmsg err';m.textContent=pre+'Master laeuft mit '+d.masterFw+' statt '+ver+' (Rollback?) - Nodes werden nicht automatisch aktualisiert.';setTimeout(function(){location.reload();},6000);return;}
+      m.textContent=pre+'Master ist wieder da - Seite wird neu geladen...';
+      setTimeout(function(){location.reload();},1500);
+    }).catch(function(){if(done)return;done=true;clearTimeout(to);next();});
+  }
+  setTimeout(poll,3000);
+}
+function upMaster(){upFile('/update?json=1','mFile','mBar','mMsg',function(r){if(!r.ok)return false;waitMaster(r.version,document.getElementById('mMsg'),r.msg+' ');return true;});}
 function upNode(){upFile('/fw/node','nFile','nBar','nMsg',null);}
+// Ein-Klick: (1) Node-Datei speichern, (2) Master aktualisieren (?auto=1: nach dem Neustart startet
+// der Master das Node-Update selbst) oder (3) nur Node-Datei: Node-Update sofort starten
+function oneClick(){
+  if(upBusy)return;
+  var mi=document.getElementById('aMFile'),ni=document.getElementById('aNFile');
+  var mf=mi.files&&mi.files[0],nf=ni.files&&ni.files[0];
+  var m=document.getElementById('aMsg'),bar=document.getElementById('aBar');
+  if(!mf&&!nf){m.className='fwmsg err';m.textContent='Bitte mindestens eine Datei auswaehlen (master.ino.bin und/oder node.ino.bin).';return;}
+  if((mf&&binBad(mf,m))||(nf&&binBad(nf,m)))return;
+  upBusy=true;upLock(true);
+  function master(){
+    xhrUp('/update?json=1&auto=1',mf,bar,m,'Master: ',function(r){
+      if(!r.ok){upDone();return;}
+      waitMaster(r.version,m,'Master startet neu ... Nodes werden danach automatisch aktualisiert. ');
+    });
+  }
+  function nodesNow(){
+    m.className='fwmsg';m.textContent='Node-Firmware gespeichert - starte das Update der Nodes...';
+    post('/fw/rollout','force=0').then(function(r){return r.text().then(function(t){
+      if(r.ok)m.textContent='Node-Firmware gespeichert - Update der Nodes gestartet (Fortschritt unten).';
+      else{m.className='fwmsg err';m.textContent='Node-Firmware gespeichert, Update nicht gestartet: '+t;}
+      upDone();});}).catch(function(){m.className='fwmsg err';m.textContent='Keine Verbindung zum Master.';upDone();});
+  }
+  if(nf)xhrUp('/fw/node',nf,bar,m,'Node: ',function(r){if(!r.ok){upDone();return;}if(mf)master();else nodesNow();});
+  else master();
+}
+function rechannel(){
+  if(upBusy)return;
+  if(!confirm('WLAN-Kanal neu waehlen?\nDer Master startet neu und sucht den freiesten Kanal. Das Handy muss sich evtl. neu verbinden, die Nodes finden den Master automatisch wieder.'))return;
+  var m=document.getElementById('chMsg');
+  post('/channel','').then(function(r){return r.text().then(function(t){
+    if(!r.ok){m.className='fwmsg err';m.textContent=t;return;}
+    upBusy=true;upLock(true);waitMaster(null,m,'Neuer Kanal wird gesucht. ');});})
+  .catch(function(){m.className='fwmsg err';m.textContent='Keine Verbindung zum Master.';});
+}
 function rollout(f){if(f&&!confirm('Alle aktiven Nodes neu flashen (auch aktuelle)?'))return;act('/fw/rollout','force='+(f?1:0));}
 function roStop(){act('/fw/cancel','');}
 function fwDelete(){if(!confirm('Gespeicherte Node-Firmware loeschen?'))return;act('/fw/delete','');}
@@ -434,26 +531,31 @@ function renderFw(d,nl){
   document.getElementById('mFw').textContent=d.masterFw||'?';
   var r=d.masterRst||0,w=rstWarn(r),mr=document.getElementById('mRst');
   mr.textContent=w?w:(RST[r]||r);mr.className=w?'bad':'';
+  document.getElementById('chInfo').textContent=(d.channel||'?')+(d.chAuto?' (automatisch gewaehlt)':' (fest in config.h)');
   var hasFs=!!d.fs;
-  document.getElementById('mUpSec').classList.toggle('hidden',!hasFs);
+  document.getElementById('aBox').classList.toggle('hidden',!hasFs);
+  document.getElementById('advSec').classList.toggle('hidden',!hasFs);
   document.getElementById('fwNodeSec').classList.toggle('hidden',!hasFs);
-  var ro=d.rollout||{},roAct=!!ro.active;
+  var ro=d.rollout||{},roAct=!!ro.active,auto=ro.autoIn>0,run=!!d.running;
   dis('startBtn',roAct);dis('forgetBtn',roAct);dis('resetBtn',roAct);
+  dis('chBtn',!d.chAuto||roAct||auto||upBusy||run);
   if(!hasFs)return;
-  var nf=d.nodeFw||{},run=!!d.running;
+  var nf=d.nodeFw||{};
   document.getElementById('nFw').textContent=nf.present?(nf.version+' ('+Math.round(nf.size/1024)+' KB)'):'keine';
   document.getElementById('fsInfo').textContent=d.fs.ok?('Speicher: '+Math.round(d.fs.used/1024)+' von '+Math.round(d.fs.total/1024)+' KB belegt'):'Dateisystem nicht verfuegbar!';
-  dis('mUpBtn',roAct||upBusy||run);dis('nUpBtn',roAct||upBusy||run||!d.fs.ok);
+  dis('mUpBtn',roAct||upBusy||run);dis('nUpBtn',roAct||upBusy||run||!d.fs.ok);dis('aUpBtn',roAct||upBusy||run);
   dis('roBtn1',roAct||upBusy||run||!nf.present);dis('roBtn2',roAct||upBusy||run||!nf.present);
-  dis('fwDel',roAct||upBusy||!nf.present);dis('roCancel',!roAct||ro.cancel);
+  dis('fwDel',roAct||upBusy||auto||!nf.present);dis('roCancel',!((roAct&&!ro.cancel)||auto));
   document.getElementById('fwMsg').textContent=d.fwMsg||'';
-  document.getElementById('roState').textContent=roAct?(ro.cancel?'Wird nach dem aktuellen Node beendet...':'Update laeuft – Nodes bitte eingeschaltet lassen!'):(run?'Waehrend eines Spiels gesperrt.':'');
+  document.getElementById('roState').textContent=roAct?(ro.cancel?'Wird nach dem aktuellen Node beendet...':'Update laeuft – Nodes bitte eingeschaltet lassen!'):
+    (auto?('Automatisches Node-Update startet in '+ro.autoIn+' s ("Abbrechen" verhindert es).'):(run?'Waehrend eines Spiels gesperrt.':''));
   var byId={};nl.forEach(function(n){byId[n.id]=n;});
   function nm(id){return 'Node '+id+(byId[id]?' ('+esc(byId[id].name)+')':'');}
   function row(a,b,c){return '<div class="rorow"><span>'+a+'</span><span style="color:'+c+'">'+b+'</span></div>';}
   var h='';
   if(roAct&&ro.cur){var n=byId[ro.cur]||{},o=n.ota||{};
-    var s=o.st==2?('l&auml;dt '+o.pct+' %'):o.st==1?'Download startet...':o.st==4?'geflasht, startet neu...':(ro.phase==2?'warte auf Neustart...':'wird angesprochen...');
+    var s=o.st==2?('l&auml;dt '+o.pct+' %'):o.st==1?'Download startet...':o.st==5?'verbindet sich mit dem WLAN...':o.st==4?'geflasht, startet neu...':
+      (ro.phase==3?'wartet auf freien WLAN-Platz...':ro.phase==2?'warte auf Neustart...':'wird angesprochen...');
     h+=row(nm(ro.cur),s,'#e3b341');}
   (ro.queue||[]).forEach(function(id){h+=row(nm(id),'wartet','#8b949e');});
   (ro.done||[]).forEach(function(id){h+=row(nm(id),'&#10003; fertig','#3fb950');});
@@ -475,10 +577,10 @@ function updateStatus(){
     document.getElementById('nodeCount').textContent=online+' / '+nl.length;
     if(d.nodes!==knownNodes){knownNodes=d.nodes;updateNameInputs(d.nodes,nl);}
 
-    // Node-Chips: gruen=verbunden, rot=offline
+    // Node-Chips: gruen=verbunden, lila=Update-Modus, rot=offline
     var g=document.getElementById('nodesGrid');g.innerHTML='';
     if(nl.length===0){var ph=document.createElement('div');ph.className='nd';ph.textContent='–';g.appendChild(ph);}
-    nl.forEach(function(n){var dot=document.createElement('div');dot.className='nd'+(n.on?' on':' off');dot.textContent=n.id;dot.title=n.name+(n.on?' (verbunden)':' (offline)');g.appendChild(dot);});
+    nl.forEach(function(n){var dot=document.createElement('div');dot.className='nd'+(n.on?(n.upd?' upd':' on'):' off');dot.textContent=n.id;dot.title=n.name+(n.on?(n.upd?' (Update-Modus)':' (verbunden)'):' (offline)');g.appendChild(dot);});
 
     // Spielerliste mit Verbindungsstatus, Signal, Firmware, Finden
     renderNodes(nl,d.masterFw);

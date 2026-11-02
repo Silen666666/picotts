@@ -8,45 +8,34 @@
 // #define LED_RGB_ANODE      // Common-anode RGB LED  (3 PWM pins, inverted)
 
 // ----------------------------------------------------------------
-// Pin assignments
+// Pin assignments (ESP32 NodeMCU, 30 Pins)
 // ----------------------------------------------------------------
-#ifdef ESP32
-  // NeoPixel – D13 header pin on 30-pin NodeMCU
-  #define NEO_PIN    13   // labeled D13 on board
-  // Simple RGB LED
-  #define LED_R_PIN  25
-  #define LED_G_PIN  26
-  #define LED_B_PIN  27
-  // Button (active LOW, internal pull-up) – D18 header pin (GPIO0/BOOT not on header)
-  #define BUTTON_PIN  18  // labeled D18 on board
-#else  // ESP8266 NodeMCU / Wemos D1 mini
-  // NeoPixel  – sicherer Pin (kein Boot-Strapping)
-  #define NEO_PIN     4    // D2 (GPIO4)
-  // Simple RGB LED
-  #define LED_R_PIN  14    // D5
-  #define LED_G_PIN  12    // D6
-  #define LED_B_PIN  13    // D7
-  // Button (active LOW, internal pull-up) – sicherer Pin, stoert den Boot nicht
-  #define BUTTON_PIN  5    // D1 (GPIO5)
-#endif
+// NeoPixel – D13 header pin on 30-pin NodeMCU
+#define NEO_PIN    13   // labeled D13 on board
+// Simple RGB LED
+#define LED_R_PIN  25
+#define LED_G_PIN  26
+#define LED_B_PIN  27
+// Button (active LOW, internal pull-up) – D18 header pin (GPIO0/BOOT not on header)
+#define BUTTON_PIN  18  // labeled D18 on board
 
 #define NEO_COUNT          8   // WS2812B-8 bar
 #define BUTTON_DEBOUNCE_MS 50
 
 // ----------------------------------------------------------------
-// Network
+// Master-WLAN – MUSS zum Master passen (master/config.h)!
+// Gespielt wird per ESP-NOW; das WLAN dient nur dazu, den Funkkanal
+// des Masters zu finden, und fuer Firmware-Updates vom Master.
 // ----------------------------------------------------------------
 #define WIFI_SSID          "ESP-CTF-Game"
 #define WIFI_PASS          ""
-#define MASTER_IP          "192.168.4.1"
+#define MASTER_IP          "192.168.4.1"   // Download-Adresse fuer Updates (nicht aendern)
 
-#define WIFI_TIMEOUT_MS   15000    // beim Start: WiFi.begin() nach dieser Zeit erneut
-// (Registrierung alle ~1 s und Status alle 2 s sind seit v2 fest im Sketch –
+// (Registrierung, Status alle 2 s und Suchzeiten sind fest im Sketch –
 //  sie gehoeren zum Protokoll mit dem Master.)
 
 // ----------------------------------------------------------------
-// OTA / Stabilitaet
+// Stabilitaet
 // ----------------------------------------------------------------
-#define OTA_PASSWORD   ""     // Passwort fuer Update per Arduino IDE ueber WLAN ("" = keins)
-#define USE_WATCHDOG   1      // ESP32: 1 = Node startet neu, falls die Firmware haengt
+#define USE_WATCHDOG   1      // 1 = Node startet neu, falls die Firmware haengt
 #define WDT_TIMEOUT_S  30     // Watchdog-Zeit in Sekunden

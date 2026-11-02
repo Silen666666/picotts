@@ -1,6 +1,7 @@
 /*
  * ESP CTF Game – Master Controller   (Firmware-Version: siehe protocol.h)
- * ESP32 (alle Funktionen) + ESP8266 (Grundfunktionen, ohne Firmware-Verteilung)
+ * Nur ESP32. Funk zu den Nodes: ESP-NOW auf dem Kanal des Master-WLANs.
+ * Das WLAN (Access Point) dient dem Handy (Web-UI) und den Nodes nur zum Firmware-Download.
  *
  * Handy: WLAN "ESP-CTF-Game" → Browser http://192.168.4.1
  * Seriell (115200):
@@ -9,36 +10,45 @@
  *   0=Stop  s=Status  r=Reconnect
  */
 
-#ifdef ESP32
-  #include <WiFi.h>
-  #include <WebServer.h>
-  #include <Update.h>
-  #include <AsyncUDP.h>
-  #include <Preferences.h>
-  #include <LittleFS.h>
-  #include <MD5Builder.h>
-  #include "esp_ota_ops.h"
-  #include "esp_task_wdt.h"
-  #include "esp_system.h"
-  WebServer webServer(80);
-#else
-  #include <ESP8266WiFi.h>
-  #include <ESP8266WebServer.h>
-  #include <ESP8266HTTPUpdateServer.h>
-  ESP8266WebServer webServer(80);
-  ESP8266HTTPUpdateServer httpUpdater;
+#ifndef ESP32
+  #error "Diese Master-Firmware laeuft nur auf dem ESP32 (Board: ESP32 Dev Module)."
 #endif
-#include <ArduinoOTA.h>
+
+#include <WiFi.h>
 #include <WiFiUdp.h>
+#include <WebServer.h>
+#include <Update.h>
+#include <Preferences.h>
+#include <LittleFS.h>
+#include <MD5Builder.h>
+#include <ArduinoOTA.h>
+#include <esp_now.h>
+#include <esp_wifi.h>
+#include "esp_ota_ops.h"
+#include "esp_task_wdt.h"
+#include "esp_system.h"
+WebServer webServer(80);
 
 #include "config.h"
 
-// ── Fallbacks: aeltere config.h-Kopien kennen diese Optionen noch nicht ──
+// ── Fallbacks: aeltere config.h-Kopien kennen manche Optionen noch nicht ──
+#ifndef WIFI_SSID
+  #define WIFI_SSID "ESP-CTF-Game"
+#endif
+#ifndef WIFI_PASS
+  #define WIFI_PASS ""
+#endif
 #ifndef WIFI_CHANNEL
-  #define WIFI_CHANNEL 0          // 0 = automatisch
+  #define WIFI_CHANNEL 0          // 0 = automatisch (beim ersten Start, danach gespeichert)
 #endif
 #ifndef AP_MAX_CONN
   #define AP_MAX_CONN 10
+#endif
+#ifndef MAX_NODES
+  #define MAX_NODES 16
+#endif
+#ifndef NODE_TIMEOUT_MS
+  #define NODE_TIMEOUT_MS 15000UL
 #endif
 #ifndef OTA_PASSWORD
   #define OTA_PASSWORD ""
@@ -49,19 +59,103 @@
 #ifndef WDT_TIMEOUT_S
   #define WDT_TIMEOUT_S 30
 #endif
-#ifndef NODE_TIMEOUT_MS
-  #define NODE_TIMEOUT_MS 15000UL
+#ifndef CTF_TEAMS
+  #define CTF_TEAMS 2
+#endif
+#ifndef CTF_DURATION_S
+  #define CTF_DURATION_S 180
+#endif
+#ifndef BOMB_SEQ_LEN
+  #define BOMB_SEQ_LEN 5
+#endif
+#ifndef BOMB_DURATION_S
+  #define BOMB_DURATION_S 120
+#endif
+#ifndef BOMB_STEP_MS
+  #define BOMB_STEP_MS 1200
+#endif
+#ifndef REACT_ROUNDS_DEFAULT
+  #define REACT_ROUNDS_DEFAULT 10
+#endif
+#ifndef REACT_TIMEOUT_MS
+  #define REACT_TIMEOUT_MS 5000
+#endif
+#ifndef REACT_DELAY_MIN_MS
+  #define REACT_DELAY_MIN_MS 600
+#endif
+#ifndef REACT_DELAY_MAX_MS
+  #define REACT_DELAY_MAX_MS 3000
+#endif
+#ifndef MAX_HIGHSCORES
+  #define MAX_HIGHSCORES 10
+#endif
+#ifndef KING_THRONE_MOVE_S
+  #define KING_THRONE_MOVE_S 30
+#endif
+#ifndef MINE_COUNT_DEFAULT
+  #define MINE_COUNT_DEFAULT 2
+#endif
+#ifndef KNOCK_LIVES_DEFAULT
+  #define KNOCK_LIVES_DEFAULT 3
+#endif
+#ifndef COLORHUNT_ROUNDS
+  #define COLORHUNT_ROUNDS 8
+#endif
+#ifndef WHAM_ROUNDS_DEFAULT
+  #define WHAM_ROUNDS_DEFAULT 15
+#endif
+#ifndef WHAM_TIMEOUT_MS
+  #define WHAM_TIMEOUT_MS 3000UL
+#endif
+#ifndef WHAM_DELAY_MIN_MS
+  #define WHAM_DELAY_MIN_MS 400
+#endif
+#ifndef WHAM_DELAY_MAX_MS
+  #define WHAM_DELAY_MAX_MS 1800
+#endif
+#ifndef ROUND_DELAY_S
+  #define ROUND_DELAY_S 10
+#endif
+#ifndef MAX_HISTORY
+  #define MAX_HISTORY 20
+#endif
+#ifndef MASTER_IS_NODE
+  #define MASTER_IS_NODE 0        // 1 = Master hat selbst LED-Balken + Taster (lokale Spieler-Station)
+#endif
+#if MASTER_IS_NODE
+  #ifndef MASTER_NEO_PIN
+    #define MASTER_NEO_PIN 13
+  #endif
+  #ifndef MASTER_BUTTON_PIN
+    #define MASTER_BUTTON_PIN 18
+  #endif
+  #ifndef MASTER_NEO_COUNT
+    #define MASTER_NEO_COUNT 8
+  #endif
+  #ifndef MASTER_NEO_BRIGHTNESS
+    #define MASTER_NEO_BRIGHTNESS 45
+  #endif
+  #ifndef MASTER_LAT_MS
+    #define MASTER_LAT_MS 6
+  #endif
+  #ifndef MASTER_BTN_DEBOUNCE_MS
+    #define MASTER_BTN_DEBOUNCE_MS 50   // wie BUTTON_DEBOUNCE_MS der Node
+  #endif
+  #include <Adafruit_NeoPixel.h>
+  #include "esp_mac.h"
 #endif
 
 #include "protocol.h"
 
-#ifdef ESP32
 // C-Linkage VOR den automatisch erzeugten Prototypen festlegen (Hook des Cores, siehe unten)
 extern "C" bool verifyRollbackLater();
-#endif
 
-#if MAX_NODES < 2 || MAX_NODES > 32
-  #error "MAX_NODES in config.h muss zwischen 2 und 32 liegen"
+// ESP-NOW: hoechstens 20 Partner (Peers) insgesamt, einer davon ist der Broadcast-Peer
+#if MAX_NODES < 2 || MAX_NODES > 19
+  #error "MAX_NODES in config.h muss zwischen 2 und 19 liegen (ESP-NOW: max. 19 Nodes)"
+#endif
+#if MAX_NODES > ESP_NOW_MAX_TOTAL_PEER_NUM - 1
+  #error "MAX_NODES ist groesser als die ESP-NOW-Peer-Tabelle"
 #endif
 
 #define BAR_LEDS     8       // LEDs je Node (NEO_COUNT der Node-Firmware)
@@ -72,17 +166,21 @@ static_assert(CTF_DESC_OFFSET + sizeof(CtfFwDesc) <= IMG_HDR_LEN, "CtfFwDesc lie
 // Node-Registry: feste ID je MAC-Adresse (im NVS gespeichert)
 // ─────────────────────────────────────────────────────────────
 struct NodeInfo {
-  uint8_t  mac[6];
+  uint8_t  mac[6];       // STA-MAC der Node = ihre Kennung und ESP-NOW-Zieladresse
   bool     known;        // Slot belegt (MAC bekannt)
-  uint32_t ip;           // letzte IP (IPv4 roh, 0 = unbekannt) – IPs koennen wechseln (DHCP)!
+  bool     reg;          // seit dem Start des Masters registriert (sonst -> PKT_RESET)
+  bool     updateOnly;   // Update-Modus: Protokoll passt nicht -> nur Firmware-Update, spielt nie mit
+  uint8_t  proto;        // bei der Registrierung gemeldetes Spiel-Protokoll
   bool     active;       // in den letzten NODE_TIMEOUT_MS etwas gehoert
   uint32_t lastSeen;
-  int8_t   rssi;         // Empfangsstaerke laut Node (dBm)
+  int8_t   rssi;         // Empfangsstaerke beim Master (dBm, geglaettet, 0 = unbekannt)
+  int8_t   rssiNode;     // Empfangsstaerke laut Node (dBm)
   uint8_t  fw[3];        // Firmware-Version laut STATUS (0.0.0 = unbekannt)
   uint8_t  flags;        // NODE_FLAG_*
   uint8_t  resetReason;  // esp_reset_reason() der Node (letzter Start)
   bool     statusSeen;   // STATUS seit der letzten Registrierung erhalten
   uint8_t  regCount;     // zaehlt Registrierungen (Rollout erkennt so den Neustart)
+  uint32_t regAt;        // Zeitpunkt der letzten Registrierung
   uint8_t  btnNonce, lastBtnSeq;   // Tasten-Dedup (Sitzung + Sequenz)
   // Soll-LED-Zustand: wird wiederholt gesendet, bis die Node ihn quittiert
   uint8_t  ledType, ledA, ledB, ledC;
@@ -96,16 +194,19 @@ NodeInfo nodes[MAX_NODES + 1];
 uint8_t  nodeCount = 0;              // hoechste bekannte ID (Luecken moeglich -> nodes[i].known pruefen)
 bool     inGame[MAX_NODES + 1];      // Teilnehmer des laufenden Spiels (aktive Nodes beim Start)
 
-#ifdef ESP32
-AsyncUDP audp;
-struct RxItem { Packet p; uint32_t ip; };
-QueueHandle_t     rxQueue = NULL;    // AsyncUDP-Task -> loop()
-volatile uint32_t rxDrops = 0;       // verworfene Pakete (Queue voll)
-#else
-WiFiUDP  udp;
-uint32_t rxDrops = 0;
-#endif
-IPAddress bcastIP(192, 168, 4, 255);
+// ESP-NOW-Empfang: der Callback (WLAN-Task!) kopiert nur in diese Queue, loop() verarbeitet
+struct RxItem { uint8_t mac[6]; int8_t rssi; Packet p; };
+#define RX_QUEUE_LEN 64
+QueueHandle_t     rxQueue   = NULL;
+volatile uint32_t rxDrops   = 0;     // verworfen, weil die Queue voll war
+volatile uint32_t rxForeign = 0;     // fremde ESP-NOW-Rahmen (falsche Laenge/Kennung)
+volatile uint32_t txFails   = 0;     // Unicast ohne Empfangsbestaetigung (Node ausser Reichweite?)
+bool              espNowOk  = false;
+static const uint8_t BCAST_MAC[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+// Nur noch zum Erkennen alter v1/v2-Nodes (funken per WLAN/UDP): keine Antworten
+WiFiUDP legacyUdp;
+bool    legacyUdpOk = false;
 
 // ─────────────────────────────────────────────────────────────
 // Spieler-Namen & Highscores
@@ -267,28 +368,31 @@ uint8_t  pendingArg    = 0;
 // Reconnect) warten einfach, bis die Animation fertig ist.
 bool actAborts(uint8_t a) { return a == ACT_START || a == ACT_STOP || a == ACT_FORGET; }
 
-// PKT_RESET per Broadcast: 3x im Abstand von ~50 ms (nicht blockierend)
+// PKT_RESET an alle (Broadcast, Ziel-MAC 0): 3x im Abstand von ~50 ms (nicht blockierend)
 uint8_t  rstBcastLeft = 0;
 uint32_t rstBcastNext = 0;
 
-// kleine IP-Tabellen: Reset-Begrenzung (1x/s je IP) und Nodes mit alter Firmware
+// Reset-Begrenzung: hoechstens 1x pro Sekunde je unbekannter MAC
+struct MacNote { uint8_t mac[6]; bool used; uint32_t t; };
+MacNote  resetNotes[8];
+// Nodes mit alter Firmware v1/v2 (funken per WLAN/UDP) – nur fuer die Warnung im Web-UI
 struct IpNote { uint32_t ip; uint32_t t; uint8_t info; };
-IpNote   resetNotes[8];
-IpNote   legacyNodes[8];     // info = gemeldete Protokollversion (1.x: 0)
+IpNote   legacyNodes[8];     // info = Generation (1 oder 2)
 
-uint32_t restartAt         = 0;   // geplanter Neustart (nach Master-Update), 0 = keiner
+uint32_t restartAt         = 0;   // geplanter Neustart (nach Master-Update / Kanalwechsel), 0 = keiner
 uint8_t  masterResetReason = 0;
 bool     wdtOn             = false;
 uint8_t  apChannel         = 1;
+bool     apChAuto          = (WIFI_CHANNEL < 1 || WIFI_CHANNEL > 13);   // Kanal automatisch (gespeichert)
 uint8_t  apMaxConn         = AP_MAX_CONN;   // tatsaechlich verwendetes Limit (1..10)
 bool     appValidMarked    = false;
 uint32_t firstLoopAt       = 0;
 bool     rolloutActive     = false;   // Node-Firmware wird gerade verteilt
+uint32_t autoRolloutAt     = 0;       // Ein-Klick-Update: Rollout startet automatisch (0 = nein)
 String   fwMsg;                       // letzte Meldung Upload/Rollout fuer das Web-UI
 String   gameMsg;                     // Hinweis, warum ein Spiel nicht gestartet ist (wird ~15 s angezeigt)
 uint32_t gameMsgAt = 0;
 
-#ifdef ESP32
 Preferences prefs;
 bool     fsOk = false;
 uint32_t fsTotal = 0, fsUsed = 0;
@@ -309,6 +413,7 @@ NodeFwInfo nodeFw;
 #define UP_MASTER 2
 uint8_t    upKind    = 0;
 bool       upStarted = false, upFail = false, upHdrOk = false, upDone = false;
+bool       upAuto    = false;   // Master-Update per Ein-Klick: danach Nodes automatisch aktualisieren
 uint16_t   upHdrLen  = 0;
 uint32_t   upTotal   = 0;
 uint8_t    upHdr[IMG_HDR_LEN];
@@ -319,70 +424,396 @@ MD5Builder upMd5;
 
 // Rollout (Node-Firmware nacheinander an die Nodes verteilen)
 #define RO_IDLE 0     // naechsten Node waehlen
-#define RO_SEND 1     // PKT_OTA senden, auf OTA_STATUS STARTED warten
+#define RO_SEND 1     // PKT_OTA senden, auf OTA_STATUS WIFI/STARTED warten
 #define RO_WAIT 2     // Node laedt/flasht, auf Neustart mit neuer Version warten
+#define RO_SLOT 3     // auf einen freien WLAN-Platz warten (Node braucht ihn fuer den Download)
 #define RO_ERR_NOANSWER 20
 #define RO_ERR_TIMEOUT  21
 #define RO_ERR_OFFLINE  22
 #define RO_ERR_VERSION  23
+#define RO_ERR_APFULL   24
+#define RO_ACK_MS       10000UL    // so lange auf OTA_STATUS WIFI/STARTED warten ...
+#define RO_SEND_GAP_MS  2500UL     // ... und PKT_OTA in diesem Abstand wiederholen (max. 4x)
+#define RO_SLOT_MS      30000UL    // so lange auf einen freien WLAN-Platz warten
+#define RO_NODE_MS      180000UL   // Gesamtlimit je Node
+#define AUTO_ROLLOUT_DELAY_MS 25000UL   // Ein-Klick-Update: Nodes erst wieder anmelden lassen
 bool     roCancel = false;
 bool     roForce  = false;   // "Alle neu flashen": Erfolg erst nach tatsaechlichem Update zaehlen
 uint8_t  roQueue[MAX_NODES];
 uint8_t  roQLen = 0, roQPos = 0;
 uint8_t  roCur = 0, roPhase = RO_IDLE, roTries = 0, roRegAt = 0;
-uint32_t roLastSend = 0, roPhaseAt = 0;
+uint32_t roLastSend = 0, roPhaseAt = 0, roNodeAt = 0;
 uint8_t  roState[MAX_NODES + 1];   // 0=-, 1=wartet, 2=laeuft, 3=fertig, 4=Fehler
 uint8_t  roErr[MAX_NODES + 1];     // OTA_ERR_* bzw. RO_ERR_*
 
 // Firmware-Kennung (wird beim Hochladen geprueft) + automatischer Rollback:
 // eine neue Firmware gilt erst nach 20 s stabilem Lauf als gut.
 extern "C" const CtfFwDesc ctf_fw_desc __attribute__((section(".rodata_custom_desc"), used)) =
-  { CTF_DESC_MAGIC, CTF_ROLE_MASTER, PROTO_VERSION, CTF_FW_MAJOR, CTF_FW_MINOR, CTF_FW_PATCH, {0, 0, 0}, CTF_FW_VERSION };
+  { CTF_DESC_MAGIC, CTF_ROLE_MASTER, PROTO_VERSION, CTF_FW_MAJOR, CTF_FW_MINOR, CTF_FW_PATCH, OTA_COMPAT, {0, 0}, CTF_FW_VERSION };
 extern "C" bool verifyRollbackLater() { return true; }
 // WICHTIG: ctf_fw_desc muss im Code BENUTZT werden (MASTER_FW_STR), sonst entfernt
 // der Linker (--gc-sections) die Kennung und Updates koennen sie nicht pruefen.
 #define MASTER_FW_STR ctf_fw_desc.version
-#else
-#define MASTER_FW_STR CTF_FW_VERSION
+
+#if MASTER_IS_NODE
+// ─────────────────────────────────────────────────────────────
+// Lokale Spieler-Station (MASTER_IS_NODE 1): der Master hat selbst LED-Balken + Taster.
+//  - steht wie jede Node in der Registry: feste ID ueber die eigene STA-MAC (im NVS wie die
+//    anderen), immer aktiv, nie Timeout, nie Update-Modus, nie im Rollout (= Master-Firmware)
+//  - KEIN ESP-NOW-Peer, empfaengt nie Funk-Rahmen: sendPkt() verweigert ihre MAC, reg bleibt
+//    false (Funk-Pakete mit ihrer ID scheitern an senderOk()), REGISTER mit ihrer MAC wird ignoriert
+//  - ledSet() wendet den Soll-Zustand sofort lokal an und gilt als quittiert
+//  - Taster: Entprellung wie node.ino; ein Flanken-Interrupt merkt sich zusaetzlich kurze Drucke,
+//    waehrend loop() blockiert (Seite senden, NVS). Gleiche Sperren wie ein Funk-Druck, aber
+//    erst MASTER_LAT_MS spaeter gewertet (Funk-Nodes haben einige ms Laufzeit -> fair)
+//  - Anzeige wie node.ino (Farben, Animationen, show() nur bei Aenderung); FLASH blitzt in der
+//    Zielfarbe statt weiss (schont das Netzteil des Masters)
+// ─────────────────────────────────────────────────────────────
+Adafruit_NeoPixel localStrip(MASTER_NEO_COUNT, MASTER_NEO_PIN, NEO_GRB + NEO_KHZ800);
+uint8_t  localId = 0;            // ID der Station (0 = nicht angemeldet, z.B. Tabelle voll)
+uint8_t  localMac[6];            // eigene STA-MAC (der Master funkt ueber die AP-MAC)
+
+static const uint32_t LCOLORS[] = {   // 24-bit RGB je COL_* (wie node.ino)
+  0x000000, 0xFF0000, 0x0000FF, 0x00FF00, 0xFFFF00, 0xFFFFFF, 0x800080, 0x00FFFF, 0xFF8000
+};
+static_assert(sizeof(LCOLORS) / sizeof(LCOLORS[0]) == COL_COUNT, "LCOLORS[] passt nicht zu COL_COUNT");
+
+struct LocalLed {
+  uint8_t  colorIdx, anim;
+  uint32_t lastChange;
+  uint8_t  phase;         // Blinken: 0 = AN
+  bool     flashDone;
+  uint8_t  barCount, barBg;
+  bool     dirty;         // neu zeichnen noetig
+};
+LocalLed lled = {COL_OFF, ANIM_SOLID, 0, 0, false, 0, COL_OFF, true};
+uint32_t lIdentUntil = 0, lIdentSince = 0;   // "Finden": weiss blinken bis (0 = aus)
+int8_t   lIdentOn    = -1;
+bool     lBtnRaw = HIGH, lBtnDeb = HIGH;     // Taster-Entprellung wie node.ino
+uint32_t lBtnTs  = 0, lSvcAt = 0;            // letzte Pegelaenderung / letzter Aufruf von localNodeService()
+bool     lPressDue = false;                  // erkannter Druck, wird ab lPressAt gewertet
+uint32_t lPressAt  = 0;
+volatile bool     lIsrHit = false;           // Interrupt: fallende Flanke seit dem letzten Aufruf ...
+volatile uint32_t lIsrAt  = 0;               // ... und ihr Zeitpunkt
+
+// Fallende Flanke am Taster: NUR merken (gewertet wird in localNodeService)
+void IRAM_ATTR localBtnIsr() {
+  if (!lIsrHit) { lIsrAt = millis(); lIsrHit = true; }
+}
+
+bool isLocal(uint8_t id) { return localId != 0 && id == localId; }
+
+uint32_t lColor(uint8_t idx) { return LCOLORS[(idx < COL_COUNT) ? idx : COL_OFF]; }
+
+void localFill(uint32_t rgb) {
+  for (uint8_t i = 0; i < MASTER_NEO_COUNT; i++) localStrip.setPixelColor(i, rgb);
+  localStrip.show();   // RMT, ~0,3 ms bei 8 LEDs, Interrupts bleiben an
+}
+
+void localSetLed(uint8_t colorIdx, uint8_t anim) {
+  if (colorIdx >= COL_COUNT) colorIdx = COL_OFF;
+  if (anim >= ANIM_COUNT)    anim = ANIM_SOLID;
+  if (colorIdx == lled.colorIdx && anim == lled.anim && anim != ANIM_FLASH) return;   // unveraendert
+  lled.colorIdx = colorIdx; lled.anim = anim;
+  lled.lastChange = millis(); lled.phase = 0; lled.flashDone = false; lled.dirty = true;
+}
+
+void localSetBar(uint8_t anim, uint8_t colorA, uint8_t count, uint8_t colorB) {
+  lled.anim     = anim;
+  lled.colorIdx = (colorA < COL_COUNT) ? colorA : COL_OFF;
+  lled.barCount = (count <= MASTER_NEO_COUNT) ? count : MASTER_NEO_COUNT;
+  lled.barBg    = (colorB < COL_COUNT) ? colorB : COL_OFF;
+  lled.lastChange = millis(); lled.phase = 0; lled.flashDone = false; lled.dirty = true;
+}
+
+// Soll-Zustand (wie PKT_SET_LED / SET_BAR / SET_SPLIT) uebernehmen – gezeichnet wird in localRender()
+void localApply(uint8_t type, uint8_t a, uint8_t b, uint8_t c) {
+  if (type == PKT_SET_LED) localSetLed(a, (b >= ANIM_BAR) ? ANIM_SOLID : b);
+  else localSetBar(type == PKT_SET_BAR ? ANIM_BAR : ANIM_SPLIT, a, b, c);
+}
+
+// Normale Anzeige (Port von updateLed() aus node.ino)
+void localUpdateLed() {
+  uint32_t now = millis(), color = lColor(lled.colorIdx);
+  switch (lled.anim) {
+    case ANIM_BLINK_SLOW:
+    case ANIM_BLINK_FAST:
+      if (now - lled.lastChange >= (lled.anim == ANIM_BLINK_SLOW ? 500UL : 125UL)) {
+        lled.phase ^= 1; lled.lastChange = now; lled.dirty = true;
+      }
+      if (!lled.dirty) return;
+      localFill(lled.phase ? 0 : color);   // Phase 0 = AN -> sofort sichtbar
+      lled.dirty = false;
+      break;
+    case ANIM_PULSE: {
+      if (now - lled.lastChange < 33) return;   // ~30 fps
+      lled.lastChange = now; lled.dirty = false;
+      uint32_t t = now % 2000;
+      uint32_t v = (t < 1000) ? (t / 4) : (255 - ((t - 1000) / 4));
+      localFill(((((color >> 16) & 0xFF) * v / 255) << 16) | ((((color >> 8) & 0xFF) * v / 255) << 8) | ((color & 0xFF) * v / 255));
+      break;
+    }
+    case ANIM_FLASH:   // Zielfarbe 80 ms, aus 60 ms, dann Zielfarbe solid (Node: weiss – hier Netzteil schonen)
+      if (!lled.flashDone) {
+        if (lled.phase == 0) {
+          if (lled.dirty) { localFill(color); lled.dirty = false; }
+          if (now - lled.lastChange >= 80) { lled.phase = 1; lled.lastChange = now; lled.dirty = true; }
+        } else if (lled.phase == 1) {
+          if (lled.dirty) { localFill(0); lled.dirty = false; }
+          if (now - lled.lastChange >= 60) { lled.phase = 2; lled.lastChange = now; lled.dirty = true; }
+        } else {
+          lled.flashDone = true; lled.dirty = true;
+        }
+      } else if (lled.dirty) { localFill(color); lled.dirty = false; }
+      break;
+    case ANIM_BAR:
+    case ANIM_SPLIT:
+      if (!lled.dirty) return;
+      for (uint8_t i = 0; i < MASTER_NEO_COUNT; i++)
+        localStrip.setPixelColor(i, (i < lled.barCount) ? color : lColor(lled.barBg));
+      localStrip.show();
+      lled.dirty = false;
+      break;
+    default:   // ANIM_SOLID
+      if (!lled.dirty) return;
+      localFill(color);
+      lled.dirty = false;
+      break;
+  }
+}
+
+// Overlay "Finden" (weiss schnell blinken), danach normale Anzeige wiederherstellen
+void localRender() {
+  if (lIdentUntil != 0) {
+    uint32_t now = millis();
+    if ((int32_t)(now - lIdentUntil) >= 0) {
+      lIdentUntil = 0; lled.dirty = true;
+      if (localId) nodes[localId].flags &= ~NODE_FLAG_IDENTIFY;
+    } else {
+      int8_t on = (((now - lIdentSince) / 125) % 2 == 0) ? 1 : 0;
+      if (on != lIdentOn) { lIdentOn = on; localFill(on ? LCOLORS[COL_WHITE] : 0); }
+      return;
+    }
+  }
+  localUpdateLed();
+}
+
+void localIdentify(uint8_t s) {
+  lIdentSince = millis();
+  lIdentUntil = (lIdentSince + (uint32_t)s * 1000UL) | 1UL;
+  lIdentOn    = -1;
+  if (localId) nodes[localId].flags |= NODE_FLAG_IDENTIFY;
+}
+
+// Druck der Station werten: gleiche Regeln wie PKT_BUTTON in processPacket()
+void localPress(bool inAnim) {
+  nodes[localId].lastSeen = millis();
+  if (inAnim || rolloutActive || actAborts(pendingAction)) {
+    Serial.printf("[BTN] Node %u lokal (ignoriert: %s)\n", localId,
+      inAnim ? "Animation" : (rolloutActive ? "Firmware-Update" : "Aktion laeuft"));
+    return;
+  }
+  Serial.printf("[BTN] Node %u (lokal)\n", localId);
+  gameOnButton(localId);   // darf yieldDelay() aufrufen -> dort localNodeService(true)
+}
+
+// Taster abfragen, Druck werten, LEDs zeichnen. Aus loop() (inAnim=false), yieldDelay() und
+// langen Upload-/Download-Schleifen (inAnim=true: Druck wird erkannt, aber verworfen).
+void localNodeService(bool inAnim) {
+  if (!localId) return;
+  uint32_t now = millis();
+  bool raw = digitalRead(MASTER_BUTTON_PIN);
+  bool blind = (uint32_t)(now - lSvcAt) >= MASTER_BTN_DEBOUNCE_MS;   // so lange nicht abgefragt (loop blockiert)
+  lSvcAt = now;
+  bool hit = lIsrHit;
+  uint32_t edge = now;
+  if (hit) { lIsrHit = false; edge = lIsrAt; }   // erst loeschen, dann lesen -> keine Flanke geht verloren
+  if (raw != lBtnRaw) {
+    lBtnRaw = raw;
+    lBtnTs  = (hit && blind && raw == LOW) ? edge : now;   // Druck begann waehrend der Blockade -> ab der Flanke
+  }
+  bool press = false;
+  if ((uint32_t)(now - lBtnTs) >= MASTER_BTN_DEBOUNCE_MS && raw != lBtnDeb) {
+    lBtnDeb = raw;
+    press = (raw == LOW);   // fallende Flanke (entprellt) = Druck
+  } else if (hit && blind && raw == HIGH && lBtnDeb == HIGH) {
+    press = true;           // kurzer Druck komplett waehrend der Blockade: nur der Interrupt hat ihn gesehen
+  }
+  if (press && !lPressDue) { lPressDue = true; lPressAt = now + MASTER_LAT_MS; }
+  if (lPressDue && (int32_t)(now - lPressAt) >= 0) {
+    lPressDue = false;      // vor localPress(): gameOnButton kann hierher zurueckkehren (yieldDelay)
+    localPress(inAnim);
+  }
+  localRender();
+}
+
+// Station in der Registry anmelden (Start und nach "Vergessen"). Eigene STA-MAC wie eine Node:
+// bekannte MAC behaelt ihre ID, sonst kleinste freie ID; ist alles belegt, wird der am laengsten
+// inaktive Slot uebernommen (nie ein Teilnehmer des laufenden Spiels).
+void localRegister(bool save) {
+  uint32_t now = millis();
+  uint8_t id = findMac(localMac);
+  bool fresh = (id == 0);
+  if (fresh) {
+    for (uint8_t i = 1; i <= MAX_NODES; i++) if (!nodes[i].known) { id = i; break; }
+    if (id == 0) {
+      uint32_t oldest = 0;
+      for (uint8_t i = 1; i <= MAX_NODES; i++) {
+        if (!nodes[i].known || nodes[i].active || (gameMode != GAME_IDLE && inGame[i])) continue;
+        uint32_t age = (uint32_t)(now - nodes[i].lastSeen);
+        if (id == 0 || age > oldest) { id = i; oldest = age; }
+      }
+    }
+    if (id == 0) { localId = 0; Serial.println("[LOKAL] Kein freier Platz – Master-Station deaktiviert"); return; }
+    if (nodes[id].known) Serial.printf("[LOKAL] ID %u wird neu vergeben (alte Node lange offline)\n", id);
+    memset(&nodes[id], 0, sizeof(NodeInfo));
+    memcpy(nodes[id].mac, localMac, 6);
+    nodes[id].known = true;
+    inGame[id] = false;
+    if (id > nodeCount) nodeCount = id;
+  }
+  char dflt[20];
+  snprintf(dflt, sizeof(dflt), "Spieler %u", id);
+  if (players[id].name[0] == 0 || strcmp(players[id].name, dflt) == 0) strcpy(players[id].name, "Master");
+  NodeInfo& n = nodes[id];
+  n.active = true; n.lastSeen = now; n.reg = false; n.updateOnly = false; n.proto = PROTO_VERSION;
+  n.rssi = 0; n.rssiNode = 0; n.statusSeen = true;
+  n.fw[0] = CTF_FW_MAJOR; n.fw[1] = CTF_FW_MINOR; n.fw[2] = CTF_FW_PATCH;
+  n.flags = 0; n.resetReason = masterResetReason;
+  n.otaState = 0; n.otaPct = 0; n.otaErr = 0;
+  localId = id;
+  if (n.ledSeq) { localApply(n.ledType, n.ledA, n.ledB, n.ledC); n.ledAcked = n.ledSeq; }
+  else localSetLed(COL_GREEN, ANIM_FLASH);   // wie eine Node nach der Registrierung
+  if (fresh && save) saveMacs();
+  Serial.printf("[LOKAL] Master-Station = Node %u %s (MAC ..%02X:%02X, Taster D%u, LEDs D%u)\n", id,
+    fresh ? "neu" : "angemeldet", localMac[4], localMac[5], MASTER_BUTTON_PIN, MASTER_NEO_PIN);
+}
 #endif
 
 // ─────────────────────────────────────────────────────────────
-// Netzwerk-Helfer
+// Funk (ESP-NOW): Peers verwalten, senden, empfangen
 // ─────────────────────────────────────────────────────────────
-// Liefert false, wenn das Paket nicht gesendet werden konnte.
-bool sendPkt(IPAddress ip, uint8_t type, uint8_t nid,
+static_assert(sizeof(Packet) == 8 && sizeof(CtfFrame) == 10, "Funkrahmen muss 10 Byte haben");
+
+bool macEq(const uint8_t* a, const uint8_t* b) { return memcmp(a, b, 6) == 0; }
+
+// Eine Unicast-MAC (nicht 00:00:.., nicht Broadcast/Multicast)?
+bool macUsable(const uint8_t* m) {
+  bool zero = true;
+  for (uint8_t k = 0; k < 6; k++) if (m[k]) zero = false;
+  return !zero && (m[0] & 0x01) == 0;
+}
+
+// Peer-Tabelle voll: einen Platz freimachen. Zuerst verwaiste Peers (MAC gehoert keiner
+// bekannten Node mehr), sonst den der am laengsten nicht gehoerten INAKTIVEN Node.
+// Der Broadcast-Peer und 'keep' werden nie entfernt.
+bool peerEvictOne(const uint8_t* keep) {
+  esp_now_peer_info_t pi;
+  bool head = true;
+  while (esp_now_fetch_peer(head, &pi) == ESP_OK) {   // liefert nur Unicast-Peers
+    head = false;
+    if (macEq(pi.peer_addr, keep) || macEq(pi.peer_addr, BCAST_MAC)) continue;
+    if (findMac(pi.peer_addr) == 0) return esp_now_del_peer(pi.peer_addr) == ESP_OK;
+  }
+  uint32_t now = millis(), bestAge = 0;
+  uint8_t  best = 0;
+  for (uint8_t i = 1; i <= MAX_NODES; i++) {
+    NodeInfo& n = nodes[i];
+    if (!n.known || n.active || macEq(n.mac, keep) || !esp_now_is_peer_exist(n.mac)) continue;
+    uint32_t age = (uint32_t)(now - n.lastSeen);
+    if (best == 0 || age > bestAge) { best = i; bestAge = age; }
+  }
+  if (best == 0) return false;
+  Serial.printf("[FUNK] Peer-Tabelle voll – Node %u (inaktiv) vorlaeufig entfernt\n", best);
+  return esp_now_del_peer(nodes[best].mac) == ESP_OK;
+}
+
+// Sorgt dafuer, dass 'mac' in der ESP-NOW-Peer-Liste steht (Senden geht nur an Peers).
+bool peerEnsure(const uint8_t* mac) {
+  if (esp_now_is_peer_exist(mac)) return true;
+  esp_now_peer_num_t pn;
+  if (esp_now_get_peer_num(&pn) == ESP_OK && pn.total_num >= ESP_NOW_MAX_TOTAL_PEER_NUM) peerEvictOne(mac);
+  esp_now_peer_info_t pi;
+  memset(&pi, 0, sizeof(pi));
+  memcpy(pi.peer_addr, mac, 6);
+  pi.channel = 0;              // 0 = aktueller Kanal des Access Points
+  pi.ifidx   = WIFI_IF_AP;     // der Master funkt ueber seine AP-Schnittstelle
+  pi.encrypt = false;
+  esp_err_t e = esp_now_add_peer(&pi);
+  if (e == ESP_OK || e == ESP_ERR_ESPNOW_EXIST) return true;
+  static uint32_t lastLog = 0;
+  if ((uint32_t)(millis() - lastLog) > 5000UL) {
+    lastLog = millis();
+    Serial.printf("[FUNK] Peer %02X:%02X:%02X:%02X:%02X:%02X nicht angelegt (Fehler %d)\n",
+      mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], (int)e);
+  }
+  return false;
+}
+
+// Sendet einen CtfFrame an 'mac' (Node-MAC oder BCAST_MAC).
+// Liefert false, wenn der Rahmen nicht abgeschickt werden konnte (z.B. Sendepuffer voll)
+// -> die vorhandenen Wiederholungen (LED-Dienst, Node-Wiederholungen) gleichen das aus.
+bool sendPkt(const uint8_t* mac, uint8_t type, uint8_t nid,
              uint8_t d0=0,uint8_t d1=0,uint8_t d2=0,
              uint8_t d3=0,uint8_t d4=0,uint8_t d5=0) {
-  Packet p; p.type=type; p.nodeId=nid;
-  p.data[0]=d0;p.data[1]=d1;p.data[2]=d2;
-  p.data[3]=d3;p.data[4]=d4;p.data[5]=d5;
-#ifdef ESP32
-  return audp.writeTo((const uint8_t*)&p, sizeof(p), ip, UDP_PORT) == sizeof(p);
-#else
-  udp.beginPacket(ip, UDP_PORT);
-  udp.write((uint8_t*)&p, sizeof(p));
-  return udp.endPacket() == 1;
+#if MASTER_IS_NODE
+  if (mac && localId && macEq(mac, localMac)) return false;   // Master-Station: nie per Funk (kein Peer)
 #endif
+  if (!espNowOk || !mac || !peerEnsure(mac)) return false;
+  CtfFrame f;
+  f.magic[0] = CTF_FRAME_MAGIC0; f.magic[1] = CTF_FRAME_MAGIC1;
+  f.p.type = type; f.p.nodeId = nid;
+  f.p.data[0]=d0; f.p.data[1]=d1; f.p.data[2]=d2;
+  f.p.data[3]=d3; f.p.data[4]=d4; f.p.data[5]=d5;
+  return esp_now_send(mac, (const uint8_t*)&f, sizeof(f)) == ESP_OK;
 }
 
 void wdtFeed() {
-#ifdef ESP32
   if (wdtOn) esp_task_wdt_reset();
-#endif
 }
 
 bool nodeValid(uint8_t id) { return id >= 1 && id <= MAX_NODES && nodes[id].known; }
 
-#ifdef ESP32
-// AsyncUDP-Callback (laeuft im async_udp-Task!): nur kopieren, nichts verarbeiten.
-void onUdpPacket(AsyncUDPPacket& pk) {
-  if (pk.length() != sizeof(Packet) || !rxQueue) return;
+// ESP-NOW-Empfang. Laeuft im WLAN-Task: NUR pruefen und in die Queue kopieren
+// (keine Ausgaben, keine Spiel-Logik, kein esp_now_send).
+void onEspNowRecv(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
+  if (!info || !info->src_addr || !data || !rxQueue) return;
+  if (len != (int)sizeof(CtfFrame) || data[0] != CTF_FRAME_MAGIC0 || data[1] != CTF_FRAME_MAGIC1) {
+    rxForeign = rxForeign + 1;
+    return;
+  }
   RxItem it;
-  memcpy(&it.p, pk.data(), sizeof(Packet));
-  it.ip = (uint32_t)pk.remoteIP();
+  memcpy(it.mac, info->src_addr, 6);
+  it.rssi = info->rx_ctrl ? (int8_t)info->rx_ctrl->rssi : 0;
+  memcpy(&it.p, data + 2, sizeof(Packet));
   if (xQueueSend(rxQueue, &it, 0) != pdTRUE) rxDrops = rxDrops + 1;   // nur dieser Task schreibt
 }
-#endif
+
+// Sendeergebnis (WLAN-Task): nur zaehlen
+void onEspNowSent(const esp_now_send_info_t* info, esp_now_send_status_t st) {
+  (void)info;
+  if (st != ESP_NOW_SEND_SUCCESS) txFails = txFails + 1;
+}
+
+// ESP-NOW starten (nach softAP). Bei Fehler laeuft der Master ohne Funk weiter (Web-UI zeigt es).
+void espNowStart() {
+  if (!rxQueue) rxQueue = xQueueCreate(RX_QUEUE_LEN, sizeof(RxItem));
+  esp_err_t e = esp_now_init();
+  if (e != ESP_OK) { esp_now_deinit(); delay(200); e = esp_now_init(); }   // ein zweiter Versuch
+  if (e != ESP_OK || !rxQueue) {
+    Serial.printf("[FUNK] FEHLER: ESP-NOW startet nicht (Fehler %d) – Master bitte neu starten!\n", (int)e);
+    espNowOk = false;
+    return;
+  }
+  esp_now_register_recv_cb(onEspNowRecv);
+  esp_now_register_send_cb(onEspNowSent);
+  espNowOk = true;
+  if (!peerEnsure(BCAST_MAC)) Serial.println("[FUNK] FEHLER: Broadcast-Peer konnte nicht angelegt werden");
+  uint8_t m[6];
+  esp_wifi_get_mac(WIFI_IF_AP, m);
+  Serial.printf("[FUNK] ESP-NOW aktiv auf Kanal %u, Master-MAC %02X:%02X:%02X:%02X:%02X:%02X\n",
+    apChannel, m[0], m[1], m[2], m[3], m[4], m[5]);
+}
 
 // ─────────────────────────────────────────────────────────────
 // Zuverlaessige LED-Steuerung: der Master merkt sich je Node den
@@ -398,14 +829,15 @@ uint32_t ledBackoff(uint8_t tries) {
 
 void ledSend(uint8_t id) {
   NodeInfo& n = nodes[id];
-  bool ok = sendPkt(IPAddress(n.ip), n.ledType, id, n.ledA, n.ledB, n.ledC, 0, 0, n.ledSeq);
+  bool ok = sendPkt(n.mac, n.ledType, id, n.ledA, n.ledB, n.ledC, 0, 0, n.ledSeq);
   n.ledSentAt = millis();
   if (!ok)                 n.ledTries = 1;    // Senden fehlgeschlagen -> bald (40 ms) erneut
   else if (n.ledTries < 250) n.ledTries++;
 }
 
 // Neuen Soll-Zustand setzen (fuer alle BEKANNTEN Nodes, auch offline –
-// er wird dann nach dem Wiederverbinden gesendet).
+// er wird dann nach dem Wiederverbinden gesendet). Nodes im Update-Modus
+// ignorieren Spiel-Pakete -> an sie wird nichts gesendet.
 void ledSet(uint8_t id, uint8_t type, uint8_t a, uint8_t b, uint8_t c) {
   if (!nodeValid(id)) return;
   NodeInfo& n = nodes[id];
@@ -416,7 +848,11 @@ void ledSet(uint8_t id, uint8_t type, uint8_t a, uint8_t b, uint8_t c) {
   n.ledSeq   = nextSeq(n.ledSeq);
   n.ledTries = 0;
   n.ledSentAt = 0;
-  if (n.active && n.ip) ledSend(id);
+#if MASTER_IS_NODE
+  // Master-Station: sofort anwenden (gezeichnet wird in localNodeService), gilt als quittiert
+  if (isLocal(id)) { localApply(type, a, b, c); n.ledAcked = n.ledSeq; return; }
+#endif
+  if (n.active && !n.updateOnly) ledSend(id);
 }
 
 // Wiederholt nicht quittierte Soll-Zustaende (loop + yieldDelay)
@@ -424,7 +860,7 @@ void ledService() {
   uint32_t now = millis();
   for (uint8_t i = 1; i <= nodeCount; i++) {
     NodeInfo& n = nodes[i];
-    if (!n.known || !n.active || !n.ip || n.ledSeq == 0 || n.ledAcked == n.ledSeq) continue;
+    if (!n.known || !n.active || n.updateOnly || n.ledSeq == 0 || n.ledAcked == n.ledSeq) continue;
     if (n.ledTries == 0 || (uint32_t)(now - n.ledSentAt) >= ledBackoff(n.ledTries)) ledSend(i);
   }
 }
@@ -444,22 +880,30 @@ void allSplit(uint8_t colorA, uint8_t countA, uint8_t colorB) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Empfang: AsyncUDP-Queue leeren, jedes Paket mit processPacket()
+// Empfang: ESP-NOW-Queue leeren, jedes Paket mit processPacket()
 // ─────────────────────────────────────────────────────────────
 void netPoll(bool inAnim) {
-#ifdef ESP32
   if (!rxQueue) return;
   RxItem it;
-  for (uint8_t k = 0; k < 64 && xQueueReceive(rxQueue, &it, 0) == pdTRUE; k++)
-    processPacket(it.p, IPAddress(it.ip), inAnim);
-#else
+  for (uint8_t k = 0; k < RX_QUEUE_LEN && xQueueReceive(rxQueue, &it, 0) == pdTRUE; k++)
+    processPacket(it.p, it.mac, it.rssi, inAnim);
+}
+
+// Alte v1/v2-Nodes (WLAN/UDP) erkennen: nur fuer die Warnung im Web-UI, keine Antwort.
+// Robust leeren: parsePacket() liefert 0, solange ein Paket nicht ganz gelesen ist.
+void legacyPoll() {
+  if (!legacyUdpOk) return;
   int sz;
-  for (uint8_t k = 0; k < 32 && (sz = udp.parsePacket()) > 0; k++) {
-    if (sz != (int)sizeof(Packet)) continue;   // falsche Groesse: parsePacket() verwirft den Rest
-    Packet p; udp.read((uint8_t*)&p, sizeof(p));
-    processPacket(p, udp.remoteIP(), inAnim);
+  for (uint8_t k = 0; k < 8 && (sz = legacyUdp.parsePacket()) > 0; k++) {
+    if (sz != (int)sizeof(Packet)) { legacyUdp.clear(); continue; }
+    Packet p;
+    if (legacyUdp.read((uint8_t*)&p, sizeof(p)) != (int)sizeof(p)) { legacyUdp.clear(); continue; }
+    // v2: REGISTER nodeId = 2, STATUS data[2] = Firmware-Major 2; alles andere: v1
+    uint8_t gen = 0;
+    if (p.type == PKT_REGISTER)    gen = (p.nodeId  == 2) ? 2 : 1;
+    else if (p.type == PKT_STATUS) gen = (p.data[2] == 2) ? 2 : 1;   // v1: PKT_PING (gleiche Nummer)
+    if (gen) legacyNote((uint32_t)legacyUdp.remoteIP(), gen);
   }
-#endif
 }
 
 // Nicht-blockierendes Warten: Web, OTA, Empfang und LED-Wiederholungen laufen weiter.
@@ -471,6 +915,9 @@ bool yieldDelay(uint32_t ms) {
     ArduinoOTA.handle();
     webServer.handleClient();
     netPoll(true);
+#if MASTER_IS_NODE
+    localNodeService(true);   // Anzeige laeuft weiter, Druck wird (wie per Funk) verworfen
+#endif
     ledService();
     wdtFeed();
     if (actAborts(pendingAction)) return false;
@@ -483,16 +930,13 @@ bool yieldDelay(uint32_t ms) {
 // Registry: Speichern (NVS), Registrierung, Pakete
 // ─────────────────────────────────────────────────────────────
 void saveMacs() {
-#ifdef ESP32
   uint8_t buf[MAX_NODES * 6];
   memset(buf, 0, sizeof(buf));
   for (uint8_t i = 1; i <= MAX_NODES; i++) if (nodes[i].known) memcpy(buf + (i - 1) * 6, nodes[i].mac, 6);
   if (prefs.begin("ctf", false)) { prefs.putBytes("macs", buf, sizeof(buf)); prefs.end(); }
-#endif
 }
 
 void loadMacs() {
-#ifdef ESP32
   uint8_t buf[MAX_NODES * 6];
   memset(buf, 0, sizeof(buf));
   if (!prefs.begin("ctf", true)) return;     // beim allerersten Start gibt es noch nichts
@@ -509,22 +953,18 @@ void loadMacs() {
     nodes[i].known = true;
     if (i > nodeCount) nodeCount = i;
   }
-#endif
 }
 
 void saveNames() {
-#ifdef ESP32
   uint8_t buf[MAX_NODES * 20];
   for (uint8_t i = 1; i <= MAX_NODES; i++) {
     memcpy(buf + (i - 1) * 20, players[i].name, 20);
     buf[(i - 1) * 20 + 19] = 0;
   }
   if (prefs.begin("ctf", false)) { prefs.putBytes("names", buf, sizeof(buf)); prefs.end(); }
-#endif
 }
 
 void loadNames() {
-#ifdef ESP32
   uint8_t buf[MAX_NODES * 20];
   memset(buf, 0, sizeof(buf));
   if (!prefs.begin("ctf", true)) return;
@@ -536,7 +976,6 @@ void loadNames() {
     memcpy(players[i].name, buf + (i - 1) * 20, 20);
     players[i].name[19] = 0;
   }
-#endif
 }
 
 uint8_t findMac(const uint8_t* mac) {
@@ -545,52 +984,78 @@ uint8_t findMac(const uint8_t* mac) {
   return 0;
 }
 
-// Antwortet einer unbekannten/verwirrten Node mit PKT_RESET (max. 1x pro Sekunde je IP)
-void maybeSendReset(uint32_t ip) {
-  if (!ip) return;
+// Fordert eine unbekannte/verwirrte Node auf, sich neu anzumelden (max. 1x pro Sekunde je MAC).
+// Unbekannte MACs sind keine Peers -> Broadcast mit der Ziel-MAC in data[0..5] (nur diese Node reagiert).
+void maybeSendReset(const uint8_t* mac) {
+  if (!macUsable(mac)) return;
   uint32_t now = millis();
   uint8_t slot = 0; uint32_t bestAge = 0; bool found = false;
   for (uint8_t k = 0; k < 8; k++) {
-    if (resetNotes[k].ip == ip) {
+    if (resetNotes[k].used && macEq(resetNotes[k].mac, mac)) {
       if ((uint32_t)(now - resetNotes[k].t) < 1000UL) return;
       slot = k; found = true; break;
     }
   }
-  if (!found) {
+  if (!found) {   // freien bzw. aeltesten Eintrag nehmen
     for (uint8_t k = 0; k < 8; k++) {
-      uint32_t age = resetNotes[k].ip ? (uint32_t)(now - resetNotes[k].t) : 0xFFFFFFFFUL;
+      uint32_t age = resetNotes[k].used ? (uint32_t)(now - resetNotes[k].t) : 0xFFFFFFFFUL;
       if (age >= bestAge) { bestAge = age; slot = k; }
     }
   }
-  resetNotes[slot].ip = ip; resetNotes[slot].t = now;
-  sendPkt(IPAddress(ip), PKT_RESET, 0xFF);
+  memcpy(resetNotes[slot].mac, mac, 6);
+  resetNotes[slot].used = true;
+  resetNotes[slot].t    = now;
+  sendPkt(BCAST_MAC, PKT_RESET, 0xFF, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
-// Node mit alter Firmware (1.x) meldet sich -> nur fuer die Warnung im Web-UI merken
-void legacyNote(uint32_t ip, uint8_t proto) {
+// Node mit alter Firmware v1/v2 (WLAN/UDP) meldet sich -> nur fuer die Warnung im Web-UI merken
+void legacyNote(uint32_t ip, uint8_t gen) {
+  if (!ip) return;
   uint32_t now = millis();
   for (uint8_t k = 0; k < 8; k++)
-    if (legacyNodes[k].ip == ip) { legacyNodes[k].t = now; legacyNodes[k].info = proto; return; }
+    if (legacyNodes[k].ip == ip) { legacyNodes[k].t = now; legacyNodes[k].info = gen; return; }
   uint8_t slot = 0; uint32_t bestAge = 0;
   for (uint8_t k = 0; k < 8; k++) {
     uint32_t age = legacyNodes[k].ip ? (uint32_t)(now - legacyNodes[k].t) : 0xFFFFFFFFUL;
     if (age >= bestAge) { bestAge = age; slot = k; }
   }
-  legacyNodes[slot].ip = ip; legacyNodes[slot].t = now; legacyNodes[slot].info = proto;
-  Serial.printf("[REG] Node mit alter Firmware (Protokoll %u) von %s – bitte einmal per USB neu flashen!\n",
-    proto, IPAddress(ip).toString().c_str());
+  legacyNodes[slot].ip = ip; legacyNodes[slot].t = now; legacyNodes[slot].info = gen;
+  Serial.printf("[REG] Node mit alter Firmware v%u (WLAN/UDP) von %s – bitte einmal per USB neu flashen!\n",
+    gen, IPAddress(ip).toString().c_str());
 }
 
-bool senderOk(uint8_t id, uint32_t ip) {
-  return ip != 0 && nodeValid(id) && nodes[id].ip == ip;
+// Absender pruefen: ID bekannt, seit dem Master-Start registriert und dieselbe MAC
+bool senderOk(uint8_t id, const uint8_t* mac) {
+  return nodeValid(id) && nodes[id].reg && macEq(nodes[id].mac, mac);
 }
 
-void handleRegister(const uint8_t* mac, uint32_t ip) {
-  bool zero = true, ff = true;
-  for (uint8_t k = 0; k < 6; k++) { if (mac[k] != 0) zero = false; if (mac[k] != 0xFF) ff = false; }
-  if (zero || ff) return;
+// Empfangsstaerke beim Master glaetten (dBm, negativ; 0 = noch kein Wert)
+void rssiAdd(NodeInfo& n, int8_t rssi) {
+  if (rssi >= 0) return;
+  if (n.rssi >= 0) { n.rssi = rssi; return; }
+  int s = (int)n.rssi * 3 + (int)rssi;            // < 0
+  n.rssi = (int8_t)(-((-s + 2) / 4));             // gerundeter Mittelwert (3:1)
+}
+
+// Gueltiges Paket einer registrierten Node: aktiv, Zeitstempel, Signal
+void nodeHeard(uint8_t id, int8_t rssi) {
+  NodeInfo& n = nodes[id];
+  if (!n.active) Serial.printf("[NODE] Node %u wieder online\n", id);
+  n.active   = true;
+  n.lastSeen = millis();
+  rssiAdd(n, rssi);
+}
+
+// PKT_REGISTER: mac = Absender (Kennung), proto = Spiel-Protokoll der Node,
+// echo = data[] der Node (ihre MAC; data[2..5] kommen im ACK zurueck)
+void handleRegister(const uint8_t* mac, uint8_t proto, const uint8_t* echo, int8_t rssi) {
+  if (!macUsable(mac)) return;
+  if (proto < 3) return;             // vor v3 gab es kein ESP-NOW -> kein Rahmen unserer Firmware
   uint32_t now = millis();
   uint8_t id = findMac(mac);
+#if MASTER_IS_NODE
+  if (isLocal(id)) return;   // fremdes Geraet mit der MAC der Master-Station – nie ueber Funk anmelden
+#endif
   bool newSlot = false;
   if (id == 0) {
     // Neue Node: kleinste freie ID ...
@@ -599,8 +1064,10 @@ void handleRegister(const uint8_t* mac, uint32_t ip) {
     if (id == 0) {
       uint32_t oldest = 0;
       for (uint8_t i = 1; i <= MAX_NODES; i++) {
-        // nie einen Teilnehmer des laufenden Spiels ersetzen (Spielzustand verweist auf die ID)
-        if (!nodes[i].known || nodes[i].active || (gameMode != GAME_IDLE && inGame[i])) continue;
+        // nie einen Teilnehmer des laufenden Spiels ersetzen (Spielzustand verweist auf die ID),
+        // auch nicht die Node, die gerade Firmware laedt (ist dabei oft kurz "offline")
+        if (!nodes[i].known || nodes[i].active || (gameMode != GAME_IDLE && inGame[i]) ||
+            (rolloutActive && i == roCur)) continue;
         uint32_t age = (uint32_t)(now - nodes[i].lastSeen);
         if (id == 0 || age > oldest) { id = i; oldest = age; }
       }
@@ -609,10 +1076,11 @@ void handleRegister(const uint8_t* mac, uint32_t ip) {
       static uint32_t lastFullLog = 0;
       if ((uint32_t)(now - lastFullLog) > 5000UL) {
         lastFullLog = now;
-        Serial.printf("[REG] Kein freier Platz (MAX_NODES=%u) – Node %s ignoriert\n", MAX_NODES, IPAddress(ip).toString().c_str());
+        Serial.printf("[REG] Kein freier Platz (MAX_NODES=%u) – Node ..%02X:%02X ignoriert\n", MAX_NODES, mac[4], mac[5]);
       }
       return;
     }
+    // (Der Peer der alten MAC bleibt stehen und wird bei Platzmangel als verwaist entfernt.)
     if (nodes[id].known) Serial.printf("[REG] ID %u wird neu vergeben (alte Node lange offline)\n", id);
     memset(&nodes[id], 0, sizeof(NodeInfo));
     memcpy(nodes[id].mac, mac, 6);
@@ -624,76 +1092,80 @@ void handleRegister(const uint8_t* mac, uint32_t ip) {
     newSlot = true;
   }
   NodeInfo& n = nodes[id];
-  // Andere Slots mit derselben IP sind veraltet (DHCP hat die IP neu vergeben)
-  for (uint8_t j = 1; j <= nodeCount; j++) {
-    if (j != id && nodes[j].known && nodes[j].ip == ip) {
-      nodes[j].ip = 0; nodes[j].active = false;
-      Serial.printf("[REG] Node %u: IP an Node %u vergeben -> offline\n", j, id);
-    }
-  }
-  // Diese IP ist jetzt eine v2-Node -> evtl. Warnung "alte Firmware" entfernen
-  for (uint8_t k = 0; k < 8; k++) if (legacyNodes[k].ip == ip) legacyNodes[k].ip = 0;
-  n.ip         = ip;
+  // Die Node schickt REGISTER mehrfach kurz hintereinander -> nur einmal protokollieren
+  bool quiet = !newSlot && n.reg && n.active && (uint32_t)(now - n.regAt) < 3000UL;
+  n.reg        = true;
+  n.regAt      = now;
+  n.proto      = proto;
+  n.updateOnly = (proto != PROTO_VERSION);   // anderes Protokoll -> nur Firmware-Update
   n.active     = true;
   n.lastSeen   = now;
+  rssiAdd(n, rssi);
   n.statusSeen = false;
   n.regCount++;
   n.ledAcked   = 0;      // Node hat nach der Registrierung nichts angewendet -> Soll-Zustand neu senden
   n.lastBtnSeq = 0;      // neue Tasten-Sitzung (Node beginnt wieder bei Seq 1, die nie 0 ist)
   n.ledTries   = 0;
   n.ledSentAt  = 0;
-  IPAddress rip(ip);
-  for (uint8_t k = 0; k < 2; k++)   // doppelt gegen Paketverlust
-    sendPkt(rip, PKT_ACK, id, id, PROTO_VERSION, mac[2], mac[3], mac[4], mac[5]);
-  Serial.printf("[REG] Node %u %s (%s, MAC ..%02X:%02X)\n", id, newSlot ? "neu" : "angemeldet",
-    rip.toString().c_str(), mac[4], mac[5]);
+  if (n.updateOnly) inGame[id] = false;   // Update-Modus: spielt nie mit
+  // ACK doppelt gegen Paketverlust; data[1] = unser Protokoll (Node erkennt so den Update-Modus)
+  bool sent = false;
+  for (uint8_t k = 0; k < 2; k++)
+    if (sendPkt(mac, PKT_ACK, id, id, PROTO_VERSION, echo[2], echo[3], echo[4], echo[5])) sent = true;
+  if (!quiet) {
+    Serial.printf("[REG] Node %u %s (MAC ..%02X:%02X, %d dBm)\n", id, newSlot ? "neu" : "angemeldet", mac[4], mac[5], rssi);
+    if (n.updateOnly)
+      Serial.printf("[REG] Node %u im UPDATE-MODUS (Protokoll %u, Master %u) – bitte Nodes aktualisieren\n", id, proto, PROTO_VERSION);
+  }
+  if (!sent) Serial.printf("[REG] Node %u: ACK konnte nicht gesendet werden\n", id);
   // Spiel laeuft und die Node spielt nicht mit (war beim Start nicht da) -> neutraler
   // Zustand. Teilnehmer bekommen ihren Soll-Zustand automatisch neu (ledAcked = 0).
-  if (gameMode != GAME_IDLE && !inGame[id])
+  if (gameMode != GAME_IDLE && !inGame[id] && !n.updateOnly)
     ledSet(id, PKT_SET_LED, (gameMode == GAME_CTF) ? COL_WHITE : COL_OFF, ANIM_SOLID, 0);
 }
 
 // EINE Verarbeitungsfunktion fuer alle Pakete (aus loop und yieldDelay).
+// mac = Absender (ESP-NOW), rssi = Empfangsstaerke beim Master.
 // inAnim = true: aufgerufen waehrend einer Animation (yieldDelay) -> Tasten
 // werden quittiert, aber nicht an das Spiel weitergegeben.
-void processPacket(const Packet& p, IPAddress rip, bool inAnim) {
-  uint32_t ip = (uint32_t)rip;
-  if (!ip) return;
-  uint32_t now = millis();
+void processPacket(const Packet& p, const uint8_t* mac, int8_t rssi, bool inAnim) {
+  if (!macUsable(mac)) return;
   uint8_t id = p.nodeId;
   switch (p.type) {
     case PKT_REGISTER:
-      if (p.nodeId != PROTO_VERSION) { legacyNote(ip, p.nodeId); break; }   // alte Firmware: kein ACK
-      handleRegister(p.data, ip);
+      handleRegister(mac, p.nodeId, p.data, rssi);   // nodeId = Protokoll der Node
       break;
 
     case PKT_STATUS: {
-      // Unbekannt / falsche IP / keine v2-Firmware -> Node soll sich neu anmelden
-      if (!senderOk(id, ip) || p.data[2] == 0) { maybeSendReset(ip); break; }
+      // Unbekannt / falsche MAC / seit dem Master-Start nicht registriert / keine gueltige
+      // Version -> Node soll sich neu anmelden (dabei wird auch das Protokoll geprueft)
+      if (!senderOk(id, mac) || p.data[2] == 0) { maybeSendReset(mac); break; }
       NodeInfo& n = nodes[id];
-      if (!n.active) Serial.printf("[NODE] Node %u wieder online\n", id);
-      n.active      = true;
-      n.lastSeen    = now;
-      n.rssi        = (int8_t)p.data[1];
+      nodeHeard(id, rssi);
+      n.rssiNode    = (int8_t)p.data[1];
       n.fw[0] = p.data[2]; n.fw[1] = p.data[3]; n.fw[2] = p.data[4];
       n.flags       = p.data[5] & NODE_FLAG_MASK;
       n.resetReason = p.data[5] >> 4;
+      if ((n.flags & NODE_FLAG_UPDATE_ONLY) && !n.updateOnly) {
+        n.updateOnly = true; inGame[id] = false;
+        Serial.printf("[NODE] Node %u meldet Update-Modus\n", id);
+      }
       n.statusSeen  = true;
       n.ledAcked    = p.data[0];
-      sendPkt(rip, PKT_PONG, id, n.ledSeq);
+      sendPkt(mac, PKT_PONG, id, n.ledSeq);
       break;
     }
 
     case PKT_BUTTON: {
-      if (!senderOk(id, ip)) { maybeSendReset(ip); break; }
+      if (!senderOk(id, mac)) { maybeSendReset(mac); break; }
       NodeInfo& n = nodes[id];
-      if (!n.active) Serial.printf("[NODE] Node %u wieder online\n", id);
-      n.active = true; n.lastSeen = now;
+      nodeHeard(id, rssi);
       uint8_t seq = p.data[0], nonce = p.data[1];
-      sendPkt(rip, PKT_BTN_ACK, id, seq, nonce);     // IMMER quittieren (auch Wiederholungen)
+      sendPkt(mac, PKT_BTN_ACK, id, seq, nonce);     // IMMER quittieren (auch Wiederholungen)
       if (nonce != n.btnNonce) n.btnNonce = nonce;   // neue Sitzung der Node -> verarbeiten
       else if (seq == n.lastBtnSeq) break;            // Wiederholung desselben Drucks
       n.lastBtnSeq = seq;
+      if (n.updateOnly) break;                        // Update-Modus: spielt nicht mit
       if (inAnim || rolloutActive || actAborts(pendingAction)) {
         Serial.printf("[BTN] Node %u (ignoriert: %s)\n", id,
           inAnim ? "Animation" : (rolloutActive ? "Firmware-Update" : "Aktion laeuft"));
@@ -705,13 +1177,14 @@ void processPacket(const Packet& p, IPAddress rip, bool inAnim) {
     }
 
     case PKT_OTA_STATUS: {
-      if (!senderOk(id, ip)) break;
+      if (!senderOk(id, mac)) break;
       uint8_t st = p.data[0];
-      if (st < OTA_ST_STARTED || st > OTA_ST_SUCCESS) break;
+      if (st < OTA_ST_STARTED || st > OTA_ST_WIFI) break;
       NodeInfo& n = nodes[id];
-      n.active = true; n.lastSeen = now;
+      nodeHeard(id, rssi);
       if (st != n.otaState || p.data[1] != n.otaPct) {
-        if      (st == OTA_ST_STARTED)  Serial.printf("[OTA] Node %u: Download gestartet\n", id);
+        if      (st == OTA_ST_WIFI)     Serial.printf("[OTA] Node %u: verbindet sich mit dem WLAN\n", id);
+        else if (st == OTA_ST_STARTED)  Serial.printf("[OTA] Node %u: Download gestartet\n", id);
         else if (st == OTA_ST_PROGRESS) Serial.printf("[OTA] Node %u: %u %%\n", id, p.data[1]);
         else if (st == OTA_ST_SUCCESS)  Serial.printf("[OTA] Node %u: geflasht, startet neu\n", id);
         else                            Serial.printf("[OTA] Node %u: FEHLER %u\n", id, p.data[2]);
@@ -720,7 +1193,7 @@ void processPacket(const Packet& p, IPAddress rip, bool inAnim) {
       break;
     }
 
-    default: break;
+    default: break;   // M->N-Pakete (z.B. eines anderen Masters) und Unbekanntes ignorieren
   }
 }
 
@@ -733,6 +1206,9 @@ void nodeTimeoutCheck() {
   for (uint8_t i = 1; i <= nodeCount; i++) {
     NodeInfo& n = nodes[i];
     if (!n.known || !n.active) continue;
+#if MASTER_IS_NODE
+    if (isLocal(i)) continue;   // Master-Station ist immer da
+#endif
     if ((uint32_t)(now - n.lastSeen) >= NODE_TIMEOUT_MS) {
       n.active = false;
       Serial.printf("[WARN] Node %u offline\n", i);
@@ -773,10 +1249,10 @@ uint32_t tAfter(uint32_t ms) { return (millis() + ms) | 1UL; }
 // Mindestanzahl aktiver Nodes je Spiel
 uint8_t minNodesFor(uint8_t m) { return (m == GAME_BOMB || m == GAME_MINESWEEPER) ? 3 : 2; }
 
-// Zurzeit verbundene Nodes (Pruefung vor dem Start)
+// Zurzeit verbundene, spielfaehige Nodes (Pruefung vor dem Start; ohne Update-Modus)
 uint8_t onlineCount() {
   uint8_t c = 0;
-  for (uint8_t i=1;i<=MAX_NODES;i++) if (nodes[i].known && nodes[i].active) c++;
+  for (uint8_t i=1;i<=MAX_NODES;i++) if (nodes[i].known && nodes[i].active && !nodes[i].updateOnly) c++;
   return c;
 }
 
@@ -820,13 +1296,8 @@ void partSplit(uint8_t colorA, uint8_t countA, uint8_t colorB) {
   for (uint8_t i=1;i<=MAX_NODES;i++) if (inGame[i]) setSplit(i,colorA,countA,colorB);
 }
 
-// Zufall: der ESP32 nutzt den Hardware-Zufallsgenerator (randomSeed() wuerde auf den
-// schwaecheren Pseudo-Zufall umschalten) – nur der ESP8266 braucht einen Startwert.
-void gameSeed() {
-#ifndef ESP32
-  randomSeed(micros() | 1UL);
-#endif
-}
+// Zufall: random() nutzt auf dem ESP32 den Hardware-Zufallsgenerator (kein randomSeed() noetig –
+// es wuerde auf den schwaecheren Pseudo-Zufall umschalten).
 
 // Spielende-Blinken (alle Teilnehmer); nach 10 s leuchten die Nodes solid weiter
 void gameOverBlink(uint8_t color, uint8_t anim = ANIM_BLINK_FAST) {
@@ -1863,6 +2334,9 @@ bool huntStart() {
   huntRoundActive = false;
   huntShowTarget  = false;
   huntDisplay = ids[0];                        // Anzeige-Node = erster Teilnehmer
+#if MASTER_IS_NODE
+  if (pc > 2 && isLocal(huntDisplay)) huntDisplay = ids[1];   // nie die Master-Station (ausser bei nur 2 Teilnehmern)
+#endif
   for (uint8_t i=0;i<=MAX_NODES;i++) { huntScores[i] = 0; huntColors[i] = COL_OFF; }
   for (uint8_t k=0;k<pc;k++) huntColors[ids[k]] = PAIR_PALETTE[random(0, 7)]; // assign random color from palette
   huntTarget = 0;
@@ -2041,10 +2515,10 @@ void startGameNow(uint8_t m) {
   if (rolloutActive) { Serial.println("[GAME] Start abgelehnt: Firmware-Update laeuft."); return; }
   if (m < GAME_CTF || m > GAME_WHACKAMOLE) return;
   gameMode=GAME_IDLE; gameEndTime=0; idleBlinkUntil=0; roundBarEndAt=0;
-  // Teilnehmer = beim Start aktive Nodes
-  for (uint8_t i=0;i<=MAX_NODES;i++) inGame[i] = (i>=1 && nodes[i].known && nodes[i].active);
+  // Teilnehmer = beim Start aktive Nodes (ohne Nodes im Update-Modus)
+  for (uint8_t i=0;i<=MAX_NODES;i++)
+    inGame[i] = (i>=1 && nodes[i].known && nodes[i].active && !nodes[i].updateOnly);
   allLED(COL_OFF,ANIM_SOLID);
-  gameSeed();
   bool ok = false;
   switch (m) {
     case GAME_CTF:         ok = ctfStart();   break;
@@ -2090,37 +2564,53 @@ void idleBlinkService() {
 // ─────────────────────────────────────────────────────────────
 // Node-Verwaltung: Reconnect / Vergessen / Finden
 // ─────────────────────────────────────────────────────────────
+// PKT_RESET an alle (Ziel-MAC 00:00:00:00:00:00), 3x per Broadcast (ohne Empfangsbestaetigung)
 void resetBroadcastService() {
   if (rstBcastLeft == 0) return;
-  if ((long)(millis() - rstBcastNext) < 0) return;
-  sendPkt(bcastIP, PKT_RESET, 0xFF);
+  if ((int32_t)(millis() - rstBcastNext) < 0) return;
+  sendPkt(BCAST_MAC, PKT_RESET, 0xFF, 0, 0, 0, 0, 0, 0);
   rstBcastLeft--;
   rstBcastNext = millis() + 50;
+}
+
+// Aktive Nodes zusaetzlich direkt (Unicast mit Empfangsbestaetigung + Wiederholungen) zuruecksetzen
+void resetActiveNodes() {
+  for (uint8_t i=1;i<=nodeCount;i++) {
+    NodeInfo& n = nodes[i];
+    if (n.known && n.active) sendPkt(n.mac, PKT_RESET, 0xFF, n.mac[0], n.mac[1], n.mac[2], n.mac[3], n.mac[4], n.mac[5]);
+  }
 }
 
 // Alle Nodes melden sich neu an – IDs bleiben (Zuordnung per MAC), Soll-LEDs werden neu gesendet
 void reconnectNodes() {
   rstBcastLeft = 3; rstBcastNext = millis();
-  for (uint8_t i=1;i<=nodeCount;i++)
-    if (nodes[i].known && nodes[i].active && nodes[i].ip) sendPkt(IPAddress(nodes[i].ip), PKT_RESET, 0xFF);
+  resetActiveNodes();
   Serial.println("[RESET] Reconnect gesendet – Nodes melden sich neu an (IDs bleiben).");
 }
 
 // Node-Liste komplett vergessen: Nodes bekommen neue Nummern (Namen bleiben je Nummer)
 void forgetNodes() {
   gameMode = GAME_IDLE; idleBlinkUntil = 0; roundBarEndAt = 0;
-  for (uint8_t i=1;i<=nodeCount;i++)
-    if (nodes[i].known && nodes[i].active && nodes[i].ip) sendPkt(IPAddress(nodes[i].ip), PKT_RESET, 0xFF);
+  resetActiveNodes();
+  // Peers bleiben vorerst stehen (Rahmen sind evtl. noch unterwegs); sie gelten ab jetzt
+  // als verwaist und werden bei Platzmangel entfernt.
   for (uint8_t i=0;i<=MAX_NODES;i++) { memset(&nodes[i], 0, sizeof(NodeInfo)); inGame[i] = false; }
   nodeCount = 0;
+#if MASTER_IS_NODE
+  localId = 0;
+  localRegister(false);   // Master-Station meldet sich sofort neu an (kleinste freie ID)
+#endif
   saveMacs();
   rstBcastLeft = 3; rstBcastNext = millis();
   Serial.println("[RESET] Node-Liste geloescht – Nodes melden sich neu an (neue Nummern).");
 }
 
 void identifyNode(uint8_t id) {
-  if (!nodeValid(id) || !nodes[id].active || !nodes[id].ip) return;
-  sendPkt(IPAddress(nodes[id].ip), PKT_IDENTIFY, id, 5);
+#if MASTER_IS_NODE
+  if (isLocal(id)) { localIdentify(5); Serial.printf("[NODE] Node %u (lokal) blinkt weiss (Finden)\n", id); return; }
+#endif
+  if (!nodeValid(id) || !nodes[id].active) return;
+  sendPkt(nodes[id].mac, PKT_IDENTIFY, id, 5);
   Serial.printf("[NODE] Node %u blinkt weiss (Finden)\n", id);
 }
 
@@ -2154,9 +2644,25 @@ String imageCheck(const uint8_t* h, uint8_t wantRole, CtfFwDesc& d) {
   if (d.role != wantRole)
     return (d.role == CTF_ROLE_MASTER) ? String("Das ist die MASTER-Firmware – hier wird die Node-Firmware (node.ino.bin) gebraucht.")
                                        : String("Das ist die NODE-Firmware – hier wird die Master-Firmware (master.ino.bin) gebraucht.");
-  if (wantRole == CTF_ROLE_NODE && d.proto != PROTO_VERSION)
-    return "Node-Firmware passt nicht zum Master (Protokoll " + String(d.proto) + ", erwartet " + String(PROTO_VERSION) + ")";
+  // Update-Kennung (Kompatibilitaetsvertrag): nur Firmware ab v3 (ESP-NOW) kann spaeter
+  // wieder per Funk aktualisiert werden. Ein anderes Spiel-Protokoll ist erlaubt (Update-Modus).
+  if (d.otaCompat != OTA_COMPAT)
+    return (wantRole == CTF_ROLE_NODE)
+      ? "Node-Firmware " + String(d.version) + " ist zu alt (vor v3, ohne ESP-NOW) – bitte die aktuelle node.ino.bin verwenden."
+      : "Master-Firmware " + String(d.version) + " ist zu alt (vor v3, ohne ESP-NOW) – damit waeren alle Nodes getrennt. Falls wirklich gewollt: per USB flashen.";
   return "";
+}
+
+// Hinweis, wenn das Spiel-Protokoll einer hochgeladenen Firmware nicht zum Master passt
+String protoNote(const CtfFwDesc& d, uint8_t role) {
+  if (d.proto == PROTO_VERSION) return "";
+  String s = " Achtung: Spiel-Protokoll " + String(d.proto) + " statt " + String(PROTO_VERSION) + " – ";
+  if (role == CTF_ROLE_NODE)
+    s += (d.proto > PROTO_VERSION) ? "Nodes laufen danach im Update-Modus, bis auch der Master aktualisiert ist."
+                                   : "Nodes laufen danach im Update-Modus, bis eine passende Node-Firmware verteilt ist.";
+  else
+    s += "Nodes laufen danach im Update-Modus, bis auch sie aktualisiert sind.";
+  return s;
 }
 
 String htmlEsc(const String& s) {
@@ -2184,7 +2690,6 @@ void jsonStr(String& j, const char* s) {
   j += '"';
 }
 
-#ifdef ESP32
 void fsRefresh() {
   if (!fsOk) { fsTotal = fsUsed = 0; return; }
   fsTotal = LittleFS.totalBytes();
@@ -2247,7 +2752,7 @@ void upBegin(uint8_t kind) {
   // Reste eines frueheren, unvollstaendigen Uploads aufraeumen
   if (Update.isRunning()) Update.abort();
   if (upFile) upFile.close();
-  upKind = kind; upStarted = true; upFail = false; upHdrOk = false; upDone = false;
+  upKind = kind; upStarted = true; upFail = false; upHdrOk = false; upDone = false; upAuto = false;
   upHdrLen = 0; upTotal = 0; upMsg = "";
   memset(&upDesc, 0, sizeof(upDesc));
 }
@@ -2289,6 +2794,9 @@ void webHandleNodeFwUpload() {
   } else if (up.status == UPLOAD_FILE_WRITE) {
     if (!upStarted || upFail || upKind != UP_NODE) return;
     netPoll(true); ledService();     // Nodes waehrend des Uploads weiter bedienen (PONG), Tasten nicht ans Spiel
+#if MASTER_IS_NODE
+    localNodeService(true);          // nur Taster/LEDs, kein WebServer-Aufruf -> im Upload-Callback erlaubt
+#endif
     size_t off = 0;
     if (!upHdrOk) {
       off = upCollectHdr(up.buf, up.currentSize);
@@ -2331,7 +2839,8 @@ void webHandleNodeFwUpload() {
     }
     nodeFw.present = true;
     upDone = true;
-    upMsg = "Node-Firmware " + String(nodeFw.version) + " gespeichert (" + String(nodeFw.size) + " Bytes).";
+    upMsg = "Node-Firmware " + String(nodeFw.version) + " gespeichert (" + String(nodeFw.size) + " Bytes)."
+          + protoNote(upDesc, CTF_ROLE_NODE);
     Serial.printf("[FW] %s MD5 %s\n", upMsg.c_str(), nodeFw.md5);
   } else if (up.status == UPLOAD_FILE_ABORTED) {
     // Achtung: ABORTED kommt auch NACH einem erfolgreichen END, wenn der Browser
@@ -2380,6 +2889,9 @@ void webHandleFwGet() {
     sent += n;
     wdtFeed();
     netPoll(true); ledService();   // andere Nodes weiter bedienen (PONG) -> sie melden sich nicht ab
+#if MASTER_IS_NODE
+    localNodeService(true);
+#endif
     if ((uint32_t)(millis() - t0) > 120000UL) break;
   }
   f.close();
@@ -2387,16 +2899,24 @@ void webHandleFwGet() {
 }
 
 // ── Rollout ──
+// Gehoert die Node zu "Veraltete Nodes aktualisieren"? (andere Version oder Update-Modus)
+bool nodeOutdated(const NodeInfo& n) { return n.updateOnly || !fwEqualsStored(n); }
+
 void rolloutStart(bool force) {
   if (rolloutActive) return;
+  autoRolloutAt = 0;   // ein evtl. geplanter automatischer Start ist damit erledigt
   if (gameMode != GAME_IDLE) { fwMsg = "Rollout nicht moeglich: Spiel laeuft – erst stoppen."; return; }
   if (!fsOk || !nodeFw.present) { fwMsg = "Keine Node-Firmware gespeichert."; return; }
+  if (!espNowOk) { fwMsg = "Rollout nicht moeglich: Funk (ESP-NOW) laeuft nicht – Master neu starten."; return; }
   roQLen = 0; roQPos = 0;
   for (uint8_t i = 0; i <= MAX_NODES; i++) { roState[i] = 0; roErr[i] = 0; }
-  for (uint8_t i = 1; i <= nodeCount; i++) {
+  for (uint8_t i = 1; i <= nodeCount; i++) {   // nodeCount <= MAX_NODES -> roQueue reicht
     NodeInfo& n = nodes[i];
     if (!n.known || !n.active) continue;
-    if (!force && fwEqualsStored(n)) continue;
+#if MASTER_IS_NODE
+    if (isLocal(i)) continue;   // Master-Station = Master-Firmware, wird nur mit dem Master aktualisiert
+#endif
+    if (!force && !nodeOutdated(n)) continue;
     roQueue[roQLen++] = i;
     roState[i] = 1;
   }
@@ -2429,56 +2949,111 @@ void rolloutNodeDone(bool ok, uint8_t err) {
 }
 
 void rolloutCancelReq() {
-  if (!rolloutActive) return;
+  if (!rolloutActive) {
+    if (autoRolloutAt) {   // geplanten automatischen Start verwerfen
+      autoRolloutAt = 0;
+      fwMsg = "Automatisches Node-Update abgebrochen.";
+      Serial.println("[ROLLOUT] Automatischer Start abgebrochen");
+    }
+    return;
+  }
   roCancel = true;
   fwMsg = "Abbruch angefordert – der aktuelle Node wird noch fertig.";
 }
 
 // Zustandsautomat: Nodes nacheinander flashen (laeuft in loop)
+//  RO_SLOT: freier WLAN-Platz fuer den Download? (max. 30 s warten)
+//  RO_SEND: PKT_OTA (mit WLAN-Kanal) alle 2,5 s, max. 4x, bis OTA_STATUS WIFI/STARTED (max. 10 s)
+//  RO_WAIT: Node laedt + flasht + startet neu; fertig, wenn sie sich mit der neuen Version meldet
+//  Gesamtlimit je Node 180 s.
 void rolloutService() {
   if (!rolloutActive) return;
   uint32_t now = millis();
   if (roPhase == RO_IDLE) {
     if (roCancel || roQPos >= roQLen || !fsOk || !nodeFw.present) { rolloutFinish(); return; }
     uint8_t id = roQueue[roQPos];
+    roCur = id;
+    if (!nodeValid(id) || !nodes[id].active) { rolloutNodeDone(false, RO_ERR_OFFLINE); return; }
     NodeInfo& n = nodes[id];
-    if (!n.known || !n.active || !n.ip) {
-      roCur = id; rolloutNodeDone(false, RO_ERR_OFFLINE);
-      return;
-    }
-    roCur = id; roState[id] = 2; roPhase = RO_SEND;
-    roTries = 0; roLastSend = now; roPhaseAt = now; roRegAt = n.regCount;
+    roState[id] = 2; roPhase = RO_SLOT;
+    roNodeAt = now; roPhaseAt = now; roLastSend = now - 1000UL; roTries = 0;
     n.otaState = 0; n.otaPct = 0; n.otaErr = 0;
     Serial.printf("[ROLLOUT] Node %u (%u/%u)\n", id, roQPos + 1, roQLen);
     return;
   }
   uint8_t id = roCur;
-  if (id < 1 || id > MAX_NODES) { roPhase = RO_IDLE; roQPos++; return; }
+  if (id < 1 || id > MAX_NODES) { roPhase = RO_IDLE; roQPos++; roCur = 0; return; }
+  if (!nodes[id].known) { rolloutNodeDone(false, RO_ERR_OFFLINE); return; }
   NodeInfo& n = nodes[id];
+  if ((uint32_t)(now - roNodeAt) >= RO_NODE_MS) { rolloutNodeDone(false, RO_ERR_TIMEOUT); return; }
+
+  if (roPhase == RO_SLOT) {
+    if (roCancel) { roPhase = RO_IDLE; roCur = 0; return; }        // noch nicht begonnen -> sofort beenden
+    if ((uint32_t)(now - roLastSend) < 500UL) return;               // 2x pro Sekunde pruefen
+    roLastSend = now;
+    if (WiFi.softAPgetStationNum() >= apMaxConn) {
+      if ((uint32_t)(now - roPhaseAt) >= RO_SLOT_MS) { rolloutNodeDone(false, RO_ERR_APFULL); return; }
+      static uint32_t lastLog = 0;
+      if ((uint32_t)(now - lastLog) >= 10000UL) { lastLog = now; Serial.println("[ROLLOUT] WLAN voll – warte auf einen freien Platz..."); }
+      return;
+    }
+    roPhase = RO_SEND; roPhaseAt = now; roTries = 0; roRegAt = n.regCount;   // Platz frei -> gleich PKT_OTA senden
+  }
+
   bool reReg = (n.regCount != roRegAt) && n.statusSeen;   // neu angemeldet + STATUS erhalten
   // Erfolg = neu gestartet mit der gespeicherten Version. Beim Erzwingen ("alle neu flashen")
   // haben die Nodes diese Version schon vorher -> dort nur nach angenommenem OTA (RO_WAIT) zaehlen.
   if (reReg && fwEqualsStored(n) && (roPhase == RO_WAIT || !roForce)) { rolloutNodeDone(true, 0); return; }
   if (reReg && roPhase == RO_SEND) {   // Node hat sich vor dem OTA neu angemeldet -> PKT_OTA erneut senden
-    roRegAt = n.regCount; if (roTries > 1) roTries = 1;
+    roRegAt = n.regCount; roTries = 0; roPhaseAt = now;
   }
-  if (n.otaState == OTA_ST_FAILED)  { rolloutNodeDone(false, n.otaErr ? n.otaErr : OTA_ERR_DOWNLOAD); return; }
+  if (n.otaState == OTA_ST_FAILED) { rolloutNodeDone(false, n.otaErr ? n.otaErr : OTA_ERR_DOWNLOAD); return; }
   if (roPhase == RO_SEND) {
-    if (n.otaState == OTA_ST_STARTED || n.otaState == OTA_ST_PROGRESS || n.otaState == OTA_ST_SUCCESS) {
+    if (n.otaState == OTA_ST_WIFI || n.otaState == OTA_ST_STARTED ||
+        n.otaState == OTA_ST_PROGRESS || n.otaState == OTA_ST_SUCCESS) {
       roPhase = RO_WAIT; roPhaseAt = now; roRegAt = n.regCount;   // ab jetzt auf Neustart warten
       return;
     }
-    if ((uint32_t)(now - roPhaseAt) >= 30000UL) { rolloutNodeDone(false, RO_ERR_NOANSWER); return; }   // Gesamtlimit
-    if (roTries == 0 || (uint32_t)(now - roLastSend) >= 1500UL) {
-      if (roTries >= 4) { rolloutNodeDone(false, RO_ERR_NOANSWER); return; }
+    if ((uint32_t)(now - roPhaseAt) >= RO_ACK_MS) { rolloutNodeDone(false, RO_ERR_NOANSWER); return; }
+    if (roTries < 4 && (roTries == 0 || (uint32_t)(now - roLastSend) >= RO_SEND_GAP_MS)) {
       uint32_t sz = nodeFw.size;
-      sendPkt(IPAddress(n.ip), PKT_OTA, id, sz & 0xFF, (sz >> 8) & 0xFF, (sz >> 16) & 0xFF, (sz >> 24) & 0xFF);
+      sendPkt(n.mac, PKT_OTA, id, sz & 0xFF, (sz >> 8) & 0xFF, (sz >> 16) & 0xFF, (sz >> 24) & 0xFF, apChannel);
       roTries++; roLastSend = now;
     }
-  } else {   // RO_WAIT
-    if (reReg) { rolloutNodeDone(false, RO_ERR_VERSION); return; }   // neu gestartet, aber alte Version
-    if ((uint32_t)(now - roPhaseAt) >= 120000UL) rolloutNodeDone(false, RO_ERR_TIMEOUT);
+  } else if (reReg) {   // RO_WAIT: neu gestartet, aber nicht mit der gespeicherten Version
+    rolloutNodeDone(false, RO_ERR_VERSION);
   }
+}
+
+// ── Ein-Klick-Update: nach dem Master-Neustart automatisch die Nodes aktualisieren ──
+// /update?auto=1 merkt sich {autoRo=1, autoVer=<neue Version>} erst nach erfolgreichem Update.end().
+// Beim Start: Merker loeschen; laeuft wirklich die neue Version (kein Rollback) und ist eine
+// Node-Firmware gespeichert -> Rollout (nur veraltete Nodes) 25 s nach dem Start.
+void autoRolloutBoot() {
+  if (!prefs.begin("ctf", false)) return;
+  bool flag = prefs.isKey("autoRo") && prefs.getUChar("autoRo", 0) == 1;
+  String expect = prefs.isKey("autoVer") ? prefs.getString("autoVer", "") : String("");
+  if (prefs.isKey("autoRo"))  prefs.remove("autoRo");
+  if (prefs.isKey("autoVer")) prefs.remove("autoVer");
+  prefs.end();
+  if (!flag) return;
+  if (expect != MASTER_FW_STR) {
+    fwMsg = "Master laeuft mit " + String(MASTER_FW_STR) + " statt " + expect + " (Rollback?) – Nodes werden nicht automatisch aktualisiert.";
+  } else if (!fsOk || !nodeFw.present) {
+    fwMsg = "Master aktualisiert auf " + String(MASTER_FW_STR) + " – keine Node-Firmware gespeichert, Nodes werden nicht automatisch aktualisiert.";
+  } else {
+    autoRolloutAt = (millis() + AUTO_ROLLOUT_DELAY_MS) | 1UL;
+    fwMsg = "Master aktualisiert auf " + String(MASTER_FW_STR) + " – Nodes werden in 25 s automatisch aktualisiert (Node-Firmware "
+          + String(nodeFw.version) + ").";
+  }
+  Serial.printf("[ROLLOUT] %s\n", fwMsg.c_str());
+}
+
+void autoRolloutService() {
+  if (autoRolloutAt == 0 || (int32_t)(millis() - autoRolloutAt) < 0) return;
+  autoRolloutAt = 0;
+  Serial.println("[ROLLOUT] Ein-Klick-Update: Nodes werden jetzt aktualisiert");
+  rolloutStart(false);
 }
 
 // ── Master-Selbst-Update (POST /update) ──
@@ -2491,10 +3066,15 @@ void webHandleUpdateUpload() {
     Serial.printf("[OTA] Master-Update: %s\n", up.filename.c_str());
     if (gameMode != GAME_IDLE || rolloutActive) { upError("Nicht moeglich, waehrend ein Spiel oder Update laeuft."); return; }
     if (restartAt) { upError("Neustart laeuft bereits."); return; }
+    // URL-Parameter (?auto=1) sind hier schon gelesen (vor dem Formular-Inhalt)
+    upAuto = webServer.hasArg("auto") && webServer.arg("auto") == "1";
     markAppValid("Update gestartet");   // laufende Firmware funktioniert offensichtlich
   } else if (up.status == UPLOAD_FILE_WRITE) {
     if (!upStarted || upFail || upKind != UP_MASTER) return;
     netPoll(true); ledService();     // Nodes waehrend des Uploads weiter bedienen (PONG)
+#if MASTER_IS_NODE
+    localNodeService(true);
+#endif
     size_t off = 0;
     if (!upHdrOk) {
       off = upCollectHdr(up.buf, up.currentSize);
@@ -2517,8 +3097,16 @@ void webHandleUpdateUpload() {
     if (!Update.end(true)) { upError(String("Pruefung fehlgeschlagen: ") + Update.errorString()); return; }
     upDone = true;
     upMsg = "Master-Firmware " + String(upDesc.version) + " installiert (" + String(upTotal) + " Bytes) – Neustart...";
-    if (upDesc.proto != PROTO_VERSION)
-      upMsg += " Achtung: anderes Protokoll (" + String(upDesc.proto) + " statt " + String(PROTO_VERSION) + ") – Nodes danach ebenfalls aktualisieren!";
+    upMsg += protoNote(upDesc, CTF_ROLE_MASTER);
+    if (upAuto) {   // Ein-Klick-Update: nach dem Neustart die Nodes automatisch aktualisieren
+      bool saved = false;
+      if (prefs.begin("ctf", false)) {
+        saved = prefs.putUChar("autoRo", 1) == 1 && prefs.putString("autoVer", upDesc.version) > 0;
+        prefs.end();
+      }
+      upMsg += saved ? " Danach werden die Nodes automatisch aktualisiert."
+                     : " (Automatisches Node-Update konnte nicht vorgemerkt werden – bitte danach von Hand starten.)";
+    }
     Serial.printf("[OTA] %s\n", upMsg.c_str());
   } else if (up.status == UPLOAD_FILE_ABORTED) {
     // ABORTED kann auch NACH einem erfolgreichen END kommen (Browser schon weg):
@@ -2576,20 +3164,15 @@ void webHandleUpdateForm() {
     "<button type='submit'>Firmware hochladen</button>"
     "</form><br><a href='/'>&#8592; Zurueck</a></body></html>");
 }
-#endif  // ESP32
 
 // Markiert die laufende Firmware als gut (kein automatischer Rollback mehr)
 void markAppValid(const char* why) {
-#ifdef ESP32
   const esp_partition_t* p = esp_ota_get_running_partition();
   esp_ota_img_states_t st;
   bool pending = p && esp_ota_get_state_partition(p, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY;
   esp_ota_mark_app_valid_cancel_rollback();
   appValidMarked = true;
   if (pending) Serial.printf("[OTA] Neue Firmware bestaetigt (%s) – kein Rollback mehr.\n", why);
-#else
-  (void)why;
-#endif
 }
 
 void rollbackService() {
@@ -2611,11 +3194,9 @@ void processPending() {
     case ACT_RECONNECT: reconnectNodes();  break;
     case ACT_FORGET:    forgetNodes();     break;
     case ACT_IDENTIFY:  identifyNode(arg); break;
-#ifdef ESP32
     case ACT_ROLLOUT:   rolloutStart(arg != 0); break;
     case ACT_CANCEL:    rolloutCancelReq();     break;
     case ACT_FWDELETE:  nodeFwDelete();         break;
-#endif
     default: break;
   }
 }
@@ -2646,7 +3227,7 @@ void webHandleStatus() {
     timeLeft=(r>0)?(uint32_t)r/1000:0;
   }
 
-  String j; j.reserve(6144);
+  String j; j.reserve(8192);
   j += "{\"nodes\":";   j += nodeCount;
   j += ",\"mode\":";    j += gameMode;
   j += ",\"running\":"; j += (gameMode!=GAME_IDLE ? "true" : "false");
@@ -2691,7 +3272,9 @@ void webHandleStatus() {
     j += ",\"team\":"; j += (gameMode==GAME_CTF ? ctfTeam[i] : 0);
     j += ",\"lock\":"; j += lockSec;
     j += ",\"v\":"; j += v;
-    j += ",\"rssi\":"; j += (int)n.rssi;
+    j += ",\"rssi\":"; j += (int)n.rssi;          // beim Master gemessen
+    j += ",\"rssiN\":"; j += (int)n.rssiNode;     // laut Node
+    j += ",\"upd\":"; j += (n.updateOnly ? "true" : "false");
     j += ",\"fw\":\"";
     if (n.fw[0] || n.fw[1] || n.fw[2]) { j += n.fw[0]; j += '.'; j += n.fw[1]; j += '.'; j += n.fw[2]; }
     j += "\",\"rst\":"; j += n.resetReason;
@@ -2699,6 +3282,9 @@ void webHandleStatus() {
     j += ",\"ota\":{\"st\":"; j += n.otaState; j += ",\"pct\":"; j += n.otaPct; j += ",\"err\":"; j += n.otaErr; j += '}';
     j += ",\"inGame\":"; j += (inGame[i] ? "true" : "false");
     j += ",\"ack\":"; j += (n.ledAcked == n.ledSeq ? "true" : "false");
+#if MASTER_IS_NODE
+    if (isLocal(i)) j += ",\"local\":true";   // Master-Station: UI zeigt "Master" statt Signalstaerke
+#endif
     j += '}';
   }
   j += ']';
@@ -2777,17 +3363,21 @@ void webHandleStatus() {
   j += ",\"stations\":"; j += WiFi.softAPgetStationNum();
   j += ",\"apMax\":"; j += apMaxConn;
   j += ",\"channel\":"; j += apChannel;
+  j += ",\"chAuto\":"; j += (apChAuto ? "true" : "false");
+  j += ",\"espnow\":"; j += (espNowOk ? "true" : "false");
   j += ",\"rxDrops\":"; j += (uint32_t)rxDrops;
+  j += ",\"rxForeign\":"; j += (uint32_t)rxForeign;
+  j += ",\"txFails\":"; j += (uint32_t)txFails;
   j += ",\"legacy\":[";
   first = true;
   for (uint8_t k = 0; k < 8; k++) {
     if (!legacyNodes[k].ip || (uint32_t)(now - legacyNodes[k].t) >= 60000UL) continue;
     if (!first) j += ',';
     first = false;
-    jsonStr(j, IPAddress(legacyNodes[k].ip).toString().c_str());
+    String li = IPAddress(legacyNodes[k].ip).toString() + " (v" + String(legacyNodes[k].info) + ")";
+    jsonStr(j, li.c_str());
   }
   j += ']';
-#ifdef ESP32
   j += ",\"fs\":{\"ok\":"; j += (fsOk ? "true" : "false");
   j += ",\"total\":"; j += fsTotal; j += ",\"used\":"; j += fsUsed; j += '}';
   j += ",\"nodeFw\":{\"present\":"; j += (nodeFw.present ? "true" : "false");
@@ -2797,6 +3387,9 @@ void webHandleStatus() {
   j += ",\"cancel\":"; j += (roCancel ? "true" : "false");
   j += ",\"cur\":"; j += roCur;
   j += ",\"phase\":"; j += roPhase;
+  uint32_t autoIn = 0;
+  if (autoRolloutAt && (int32_t)(autoRolloutAt - now) > 0) autoIn = ((uint32_t)(autoRolloutAt - now) + 999UL) / 1000UL;
+  j += ",\"autoIn\":"; j += autoIn;
   const char* keys[3] = {"queue", "done", "failed"};
   const uint8_t states[3] = {1, 3, 4};
   for (uint8_t s = 0; s < 3; s++) {
@@ -2815,7 +3408,6 @@ void webHandleStatus() {
   j += ",\"fwMsg\":"; jsonStr(j, fwMsg.c_str());
   if (gameMsgAt && (uint32_t)(millis() - gameMsgAt) > 15000UL) gameMsgAt = 0;
   j += ",\"gameMsg\":"; jsonStr(j, gameMsgAt ? gameMsg.c_str() : "");
-#endif
   j += '}';
 
   webServer.sendHeader("Access-Control-Allow-Origin","*");
@@ -2861,7 +3453,7 @@ void webHandleIdentify() {
   int id = webServer.arg("id").toInt();
   if (id < 1 || id > MAX_NODES || !nodes[id].known) { webServer.send(400,"text/plain","Unbekannte Node"); return; }
   if (!nodes[id].active) { webServer.send(409,"text/plain","Node ist offline"); return; }
-  identifyNode((uint8_t)id);   // nur ein UDP-Paket, aendert keinen Spielzustand -> direkt, ohne Spiel-Animation abzubrechen
+  identifyNode((uint8_t)id);   // nur ein Funk-Paket, aendert keinen Spielzustand -> direkt, ohne Spiel-Animation abzubrechen
   webServer.send(200, "text/plain", "OK");
 }
 
@@ -2906,7 +3498,6 @@ void webHandleClearScores() {
   webServer.send(200,"text/plain","OK");
 }
 
-#ifdef ESP32
 void webHandleRollout() {
   if (rolloutActive)        { webServer.send(409,"text/plain","Rollout laeuft bereits."); return; }
   if (gameMode!=GAME_IDLE)  { webServer.send(409,"text/plain","Spiel laeuft – bitte erst stoppen."); return; }
@@ -2916,9 +3507,24 @@ void webHandleRollout() {
 void webHandleFwCancel() { webSetPending(ACT_CANCEL, 0); }
 void webHandleFwDelete() {
   if (rolloutActive) { webServer.send(409,"text/plain","Nicht moeglich, waehrend die Nodes aktualisiert werden."); return; }
+  if (autoRolloutAt) { webServer.send(409,"text/plain","Automatisches Node-Update ist geplant – erst abbrechen."); return; }
   webSetPending(ACT_FWDELETE, 0);
 }
-#endif
+
+// WLAN-Kanal neu waehlen: gespeicherten Kanal loeschen und neu starten (beim Start wird gesucht)
+void webHandleChannel() {
+  if (!apChAuto)                  { webServer.send(409,"text/plain","Der Kanal ist in config.h fest eingestellt (WIFI_CHANNEL)."); return; }
+  if (gameMode != GAME_IDLE)      { webServer.send(409,"text/plain","Spiel laeuft – bitte erst stoppen."); return; }
+  if (rolloutActive || autoRolloutAt) { webServer.send(409,"text/plain","Nicht moeglich, waehrend die Nodes aktualisiert werden."); return; }
+  if (restartAt)                  { webServer.send(409,"text/plain","Neustart laeuft bereits."); return; }
+  if (prefs.begin("ctf", false)) {
+    if (prefs.isKey("apch")) prefs.remove("apch");
+    prefs.end();
+  }
+  Serial.println("[WLAN] Kanal wird beim Neustart neu gewaehlt");
+  webServer.send(200, "text/plain", "OK");
+  restartAt = (millis() + 800UL) | 1UL;   // Neustart erst nach der Antwort (in loop)
+}
 
 // ─────────────────────────────────────────────────────────────
 // Serielles Menü (Aktionen laufen wie im Web ueber processPending)
@@ -2945,13 +3551,15 @@ void handleSerial() {
   if      (c=='0') { if (pendingAction==ACT_NONE) pendingAction=ACT_STOP; }
   else if (c=='r') { if (pendingAction==ACT_NONE) pendingAction=ACT_RECONNECT; }
   else if (c=='s') {
-    Serial.printf("Firmware %s  Modus:%u  Nodes(max ID):%u  WLAN-Geraete:%u  Kanal:%u  RX-Verluste:%u\n",
-      CTF_FW_VERSION, gameMode, nodeCount, WiFi.softAPgetStationNum(), apChannel, (unsigned)rxDrops);
+    Serial.printf("Firmware %s  Modus:%u  Nodes(max ID):%u  WLAN-Geraete:%u  Kanal:%u  ESP-NOW:%s  RX-Verluste:%u  TX-Fehler:%u  Fremd:%u\n",
+      MASTER_FW_STR, gameMode, nodeCount, WiFi.softAPgetStationNum(), apChannel, espNowOk ? "ok" : "FEHLER",
+      (unsigned)rxDrops, (unsigned)txFails, (unsigned)rxForeign);
     for (uint8_t i=1;i<=nodeCount;i++) {
       NodeInfo& n = nodes[i];
       if (!n.known) continue;
-      Serial.printf("  Node%u '%s': %s  %s  RSSI %d  FW %u.%u.%u  Reset:%s  LED %s\n", i, players[i].name,
-        n.active?"OK":"offline", IPAddress(n.ip).toString().c_str(), n.rssi, n.fw[0], n.fw[1], n.fw[2],
+      Serial.printf("  Node%u '%s': %s  %02X:%02X:%02X:%02X:%02X:%02X  RSSI %d/%d  FW %u.%u.%u%s  Reset:%s  LED %s\n", i, players[i].name,
+        n.active?"OK":"offline", n.mac[0], n.mac[1], n.mac[2], n.mac[3], n.mac[4], n.mac[5], n.rssi, n.rssiNode,
+        n.fw[0], n.fw[1], n.fw[2], n.updateOnly ? " UPDATE-MODUS" : "",
         resetReasonText(n.resetReason), (n.ledAcked==n.ledSeq)?"ok":"ausstehend");
     }
     if (highScoreCount>0) {
@@ -2989,19 +3597,43 @@ uint8_t pickChannel() {
   return CH[best];
 }
 
+// Kanal: fest aus config.h, sonst der beim ersten Start gewaehlte (gespeichert -> die Nodes
+// finden den Master nach einem Neustart sofort wieder). "WLAN-Kanal neu waehlen" loescht ihn.
+uint8_t chooseChannel() {
+  if (!apChAuto) return (uint8_t)WIFI_CHANNEL;
+  uint8_t ch = 0;
+  if (prefs.begin("ctf", true)) { ch = prefs.getUChar("apch", 0); prefs.end(); }
+  if (ch >= 1 && ch <= 13) { Serial.printf("[WLAN] Gespeicherter Kanal %u\n", ch); return ch; }
+  return pickChannel();
+}
+
+void saveChannel(uint8_t ch) {
+  if (!apChAuto || !prefs.begin("ctf", false)) return;
+  if (prefs.getUChar("apch", 0) != ch) prefs.putUChar("apch", ch);
+  prefs.end();
+}
+
 // ─────────────────────────────────────────────────────────────
 // setup / loop
 // ─────────────────────────────────────────────────────────────
 void setup() {
+#if MASTER_IS_NODE
+  // Master-Station: ZUERST den LED-Balken loeschen (vor Kanalsuche und AP-Start);
+  // nach einem Brownout nur halbe Helligkeit (Netzteil schonen)
+  localStrip.begin();
+  localStrip.setBrightness(esp_reset_reason() == ESP_RST_BROWNOUT ? MASTER_NEO_BRIGHTNESS / 2 : MASTER_NEO_BRIGHTNESS);
+  localStrip.show();
+#endif
   Serial.begin(115200);
   delay(300);
-#ifdef ESP32
   uint8_t rr = (uint8_t)esp_reset_reason();
   masterResetReason = (rr > 15) ? 15 : rr;
-#endif
   Serial.printf("\n=== ESP CTF Game – Master  Firmware %s (Protokoll %u) ===\n", MASTER_FW_STR, PROTO_VERSION);
   Serial.printf("Letzter Neustart: %s\n", resetReasonText(masterResetReason));
   if (masterResetReason == 9) Serial.println("!!! BROWNOUT: Stromversorgung des Masters pruefen !!!");
+#if MASTER_IS_NODE
+  if (masterResetReason == 9) Serial.println("[LOKAL] LED-Balken der Master-Station laeuft mit halber Helligkeit");
+#endif
 
   // Gespeicherte Node-Zuordnung (MAC -> ID) und Spielernamen laden
   loadMacs();
@@ -3009,8 +3641,15 @@ void setup() {
   for (uint8_t i=1;i<=MAX_NODES;i++)
     if (nodes[i].known && players[i].name[0]==0) snprintf(players[i].name,20,"Spieler %u",i);
   Serial.printf("Bekannte Nodes: %u\n", nodeCount);
+#if MASTER_IS_NODE
+  // Master-Station: Taster wie bei einer Node (+ Flanken-Interrupt), Anmeldung mit der eigenen STA-MAC
+  pinMode(MASTER_BUTTON_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(MASTER_BUTTON_PIN), localBtnIsr, FALLING);
+  lIsrHit = false;
+  esp_read_mac(localMac, ESP_MAC_WIFI_STA);    // eindeutig, aendert sich nie (AP-MAC = STA-MAC + 1)
+  localRegister(true);
+#endif
 
-#ifdef ESP32
   // Speicher fuer Node-Firmware (formatiert sich beim ersten Start selbst)
   fsOk = LittleFS.begin(true);
   if (fsOk) {
@@ -3022,11 +3661,9 @@ void setup() {
   } else {
     Serial.println("[FS] LittleFS nicht verfuegbar – Node-Firmware kann nicht gespeichert werden.");
   }
-#endif
 
-  // WLAN Access Point
-  apChannel = WIFI_CHANNEL;
-  if (apChannel < 1 || apChannel > 13) apChannel = pickChannel();
+  // WLAN Access Point (Handy + Node-Updates); ESP-NOW funkt auf demselben Kanal
+  apChannel = chooseChannel();
   int maxConn = AP_MAX_CONN;
   if (maxConn < 1) maxConn = 1;
   if (maxConn > 10) maxConn = 10;    // ESP32: effektiv max. 10 Stationen
@@ -3036,22 +3673,15 @@ void setup() {
   bool apOk = WiFi.softAP(WIFI_SSID, pass, apChannel, 0, maxConn);
   if (!apOk && apChannel != 1) { apChannel = 1; apOk = WiFi.softAP(WIFI_SSID, pass, apChannel, 0, maxConn); }
   if (!apOk) Serial.println("[WLAN] FEHLER: Access Point startet nicht! (WIFI_PASS muss leer oder mind. 8 Zeichen sein)");
-#ifdef ESP32
-  WiFi.setSleep(false);   // AP-Stromsparen aus -> keine verpassten Pakete
-  IPAddress b = WiFi.softAPBroadcastIP();
-  if ((uint32_t)b != 0) bcastIP = b;
-#else
-  WiFi.setSleepMode(WIFI_NONE_SLEEP);
-#endif
-  Serial.printf("AP: %s  IP: %s  Kanal:%u  maxConn:%d\n", WIFI_SSID, WiFi.softAPIP().toString().c_str(), apChannel, maxConn);
+  else saveChannel(apChannel);
+  WiFi.setSleep(false);   // Stromsparen aus -> keine verpassten Pakete
+  Serial.printf("AP: %s  IP: %s  Kanal:%u%s  maxConn:%d\n", WIFI_SSID, WiFi.softAPIP().toString().c_str(), apChannel,
+    apChAuto ? " (automatisch)" : " (config.h)", maxConn);
 
-#ifdef ESP32
-  rxQueue = xQueueCreate(64, sizeof(RxItem));
-  audp.onPacket(onUdpPacket);
-  if (!rxQueue || !audp.listen(UDP_PORT)) Serial.println("[UDP] FEHLER: Empfang konnte nicht gestartet werden!");
-#else
-  udp.begin(UDP_PORT);
-#endif
+  // Funk zu den Nodes (ESP-NOW) – erst nach dem Start des Access Points
+  espNowStart();
+  // Alte v1/v2-Nodes (WLAN/UDP) nur erkennen, um im Web-UI zu warnen
+  legacyUdpOk = legacyUdp.begin(UDP_PORT) == 1;
 
   webServer.on("/",            webHandleRoot);
   webServer.on("/status",      webHandleStatus);
@@ -3062,7 +3692,7 @@ void setup() {
   webServer.on("/reset",       HTTP_POST, webHandleReset);
   webServer.on("/forget",      HTTP_POST, webHandleForget);
   webServer.on("/identify",    HTTP_POST, webHandleIdentify);
-#ifdef ESP32
+  webServer.on("/channel",     HTTP_POST, webHandleChannel);
   webServer.on("/update", HTTP_GET,  webHandleUpdateForm);
   webServer.on("/update", HTTP_POST, webHandleUpdateResult, webHandleUpdateUpload);
   webServer.on("/fw/node",     HTTP_POST, webHandleNodeFwResult, webHandleNodeFwUpload);
@@ -3073,9 +3703,6 @@ void setup() {
   // Content-Type wird fuer den RAW-Modus-Schutz der Upload-Routen gebraucht
   const char* hdrs[] = {"Content-Type"};
   webServer.collectHeaders(hdrs, 1);
-#else
-  httpUpdater.setup(&webServer, "/update");
-#endif
   webServer.begin();
 
   // ArduinoOTA (fuer Flashen via Arduino IDE Netzwerk-Port)
@@ -3083,7 +3710,11 @@ void setup() {
   if (strlen(OTA_PASSWORD) > 0) ArduinoOTA.setPassword(OTA_PASSWORD);
   ArduinoOTA.onStart([]()  { Serial.println("[OTA] Start"); markAppValid("OTA gestartet"); });
   ArduinoOTA.onEnd([]()    { Serial.println("[OTA] Fertig"); });
+#if MASTER_IS_NODE
+  ArduinoOTA.onProgress([](unsigned int, unsigned int) { wdtFeed(); localNodeService(true); });
+#else
   ArduinoOTA.onProgress([](unsigned int, unsigned int) { wdtFeed(); });
+#endif
   ArduinoOTA.onError([](ota_error_t e) { Serial.printf("[OTA] Fehler %u\n", e); });
   ArduinoOTA.begin();
 
@@ -3093,7 +3724,10 @@ void setup() {
   Serial.println("         7=KingHill 8=TugWar 9=Minesweeper k=Knockout h=ColorHunt w=WhackaMole");
   Serial.println("         0=Stop s=Status r=Reconnect");
 
-#if defined(ESP32) && USE_WATCHDOG
+  // Ein-Klick-Update: Nodes nach dem Master-Update automatisch aktualisieren?
+  autoRolloutBoot();
+
+#if USE_WATCHDOG
   // Watchdog erst am Ende (nach evtl. LittleFS-Formatierung und Kanalsuche)
   esp_task_wdt_config_t wc = { .timeout_ms = (uint32_t)WDT_TIMEOUT_S * 1000UL, .idle_core_mask = 1, .trigger_panic = true };
   esp_err_t we = esp_task_wdt_reconfigure(&wc);
@@ -3107,18 +3741,21 @@ void loop() {
   ArduinoOTA.handle();
   webServer.handleClient();
   netPoll(false);
+#if MASTER_IS_NODE
+  localNodeService(false);   // Taster der Master-Station (wie ein Funk-Druck) + LEDs zeichnen
+#endif
   ledService();
   handleSerial();
   processPending();
   nodeTimeoutCheck();
   idleBlinkService();
-#ifdef ESP32
   rolloutService();
-#endif
+  autoRolloutService();
   resetBroadcastService();
+  legacyPoll();
 
-  // Geplanter Neustart nach Master-Update (nie direkt im Web-Handler)
-  if (restartAt != 0 && (long)(millis() - restartAt) >= 0) {
+  // Geplanter Neustart nach Master-Update / Kanalwechsel (nie direkt im Web-Handler)
+  if (restartAt != 0 && (int32_t)(millis() - restartAt) >= 0) {
     Serial.println("[OTA] Neustart...");
     Serial.flush();
     ESP.restart();

@@ -1,5 +1,5 @@
 ╔══════════════════════════════════════════════════════════════════╗
-║              ESP CTF GAME – VERDRAHTUNGSSCHEMA  (v2.0)           ║
+║              ESP CTF GAME – VERDRAHTUNGSSCHEMA  (v3.0)           ║
 ╚══════════════════════════════════════════════════════════════════╝
 
   Ziel-Hardware: ESP32-WROOM-32 "NodeMCU" Board (30 Pins).
@@ -61,6 +61,15 @@
   Nur Stromversorgung via USB – kein Taster, keine LED nötig.
   Bedienung über Browser (Handy verbindet sich mit dem WLAN des Masters).
 
+  OPTIONAL (ab v3): Master als Spieler-Station – in master/config.h
+  "#define MASTER_IS_NODE 1" setzen. Verdrahtung wie bei einer Node:
+    WS2812B IN  ──[300Ω]── D13      Taster ── D18 und GND (100 nF parallel)
+    WS2812B VCC ────────── VIN      WS2812B GND ── GND
+  ⚠ Netzteil mind. 1 A, kurzes dickes Kabel, 470–1000 µF an der LED-Leiste.
+    Ein Brownout am Master beendet das Spiel für ALLE. Am besten Taster +
+    LED-Leiste in ein eigenes Kästchen an 1–2 m Kabel, damit niemand auf
+    den Master schlägt und er zentral stehen bleiben kann.
+
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   C) GESAMTÜBERSICHT
@@ -68,23 +77,24 @@
 
   ┌──────────────────────────────────────────┐
   │                MASTER-ESP32              │
-  │   WLAN-AP "ESP-CTF-Game"                 │
+  │   WLAN-AP "ESP-CTF-Game" (fürs Handy)    │
   │   Web-UI → http://192.168.4.1            │
   │   speichert Node-Firmware für OTA        │
   └────────────┬─────────────────────────────┘
-               │ WLAN (UDP)
+               │ ESP-NOW (Funk, ohne WLAN-Anmeldung)
        ┌───────┼──────────────────┐
        │       │                  │
   ┌────┴──┐ ┌──┴────┐ ┌──────────┴┐
-  │Node 1 │ │Node 2 │ │  Node 3   │  …  max. 9 Nodes
+  │Node 1 │ │Node 2 │ │  Node 3   │  …  max. 19 Nodes
   │ LED   │ │ LED   │ │  LED      │
   │ Taster│ │ Taster│ │  Taster   │
   └───────┘ └───────┘ └───────────┘
 
   Handy ──WLAN──► "ESP-CTF-Game" ──► Browser: http://192.168.4.1
 
-  ⚠ Der ESP32-Access-Point erlaubt höchstens 10 gleichzeitige
-    WLAN-Geräte: also max. 9 Nodes + 1 Handy.
+  Ab v3 funken die Nodes per ESP-NOW und brauchen keinen WLAN-Platz:
+  bis zu 19 Nodes (MAX_NODES in master/config.h). Das WLAN des Masters
+  (max. 10 Geräte) nutzen nur die Handys – und jede Node kurz für ihr Update.
 
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -115,12 +125,8 @@
    leicht abweichen – maßgeblich ist die Beschriftung auf dem Board:
    "D13", "D18", "GND", "VIN".)
 
-
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  E) ESP8266 (NodeMCU / D1 mini) – nur noch eingeschränkt
+  E) ESP8266 – ab v3 nicht mehr unterstützt
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  Ab v2.0 wird nur noch der ESP32 getestet. Für ESP8266-Nodes gelten
-  (ohne OTA-Verteilung über den Master):
-    WS2812B IN  → D2 (GPIO4)
-    Taster      → D1 (GPIO5) und GND
+  v3 funkt per ESP-NOW in der ESP32-Variante und läuft nur noch auf ESP32-Boards.
