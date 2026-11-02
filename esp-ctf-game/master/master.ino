@@ -2711,6 +2711,21 @@ void loadNodeFwMeta() {
   size_t real = f.size();
   f.close();
   if (real != sz || sz == 0 || strlen(md5) != 32) return;
+  // Kopf der gespeicherten Datei pruefen: eine von v1/v2 uebrig gebliebene Node-Firmware
+  // (ohne v3-Update-Kennung) wuerde jede Node beim Update ablehnen -> verwerfen.
+  {
+    uint8_t h[IMG_HDR_LEN];
+    File g = LittleFS.open("/node.bin", "r");
+    size_t got = g ? g.read(h, IMG_HDR_LEN) : 0;
+    if (g) g.close();
+    CtfFwDesc d;
+    if (got != IMG_HDR_LEN || imageCheck(h, CTF_ROLE_NODE, d).length()) {
+      LittleFS.remove("/node.bin"); LittleFS.remove("/node.meta");
+      fwMsg = "Gespeicherte Node-Firmware ist ungueltig oder zu alt (vor v3) und wurde verworfen – bitte node.ino.bin (v3) neu hochladen.";
+      Serial.printf("[FW] %s\n", fwMsg.c_str());
+      return;
+    }
+  }
   nodeFw.present = true;
   nodeFw.major = a; nodeFw.minor = b; nodeFw.patch = c; nodeFw.proto = pr;
   nodeFw.size = sz;
@@ -2900,7 +2915,10 @@ void webHandleFwGet() {
 
 // ── Rollout ──
 // Gehoert die Node zu "Veraltete Nodes aktualisieren"? (andere Version oder Update-Modus)
-bool nodeOutdated(const NodeInfo& n) { return n.updateOnly || !fwEqualsStored(n); }
+// Veraltet = andere Version als die gespeicherte Node-Firmware. Eine Node im Update-Modus,
+// die diese Version schon hat, kann durch erneutes Flashen nicht besser werden
+// (dann passt die gespeicherte Firmware nicht zum Master -> passende node.ino.bin hochladen).
+bool nodeOutdated(const NodeInfo& n) { return !fwEqualsStored(n); }
 
 void rolloutStart(bool force) {
   if (rolloutActive) return;
@@ -3041,6 +3059,9 @@ void autoRolloutBoot() {
     fwMsg = "Master laeuft mit " + String(MASTER_FW_STR) + " statt " + expect + " (Rollback?) – Nodes werden nicht automatisch aktualisiert.";
   } else if (!fsOk || !nodeFw.present) {
     fwMsg = "Master aktualisiert auf " + String(MASTER_FW_STR) + " – keine Node-Firmware gespeichert, Nodes werden nicht automatisch aktualisiert.";
+  } else if (nodeFw.proto != PROTO_VERSION) {
+    fwMsg = "Master aktualisiert auf " + String(MASTER_FW_STR) + " – die gespeicherte Node-Firmware " + String(nodeFw.version)
+          + " passt nicht zum Master-Protokoll. Bitte passende node.ino.bin hochladen.";
   } else {
     autoRolloutAt = (millis() + AUTO_ROLLOUT_DELAY_MS) | 1UL;
     fwMsg = "Master aktualisiert auf " + String(MASTER_FW_STR) + " – Nodes werden in 25 s automatisch aktualisiert (Node-Firmware "
