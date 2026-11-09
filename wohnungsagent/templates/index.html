@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Treffer{% endblock %}
+{% block content %}
+<section class="summary">
+  <div class="kpi"><b>{{ counts.passend }}</b><span>passende Treffer</span></div>
+  <div class="kpi"><b>{{ counts.neu }}</b><span>davon neu</span></div>
+  <div class="kpi"><b>{{ counts.favoriten }}</b><span>Favoriten</span></div>
+  <div class="kpi"><b>{{ counts.total }}</b><span>Treffer gesamt</span></div>
+  <form method="post" action="{{ url_for('run_now') }}" class="runform">
+    <button class="primary" {{ 'disabled' if agent.running }}>Jetzt suchen</button>
+    <small>{{ settings.places|length }} Orte · {{ 'Miete' if settings.mode == 'miete' else 'Kauf' }}
+      {% if settings.max_price %}· bis {{ settings.max_price|eur }}{% endif %}
+      {% if settings.min_rooms %}· ab {{ settings.min_rooms|num }} Zi.{% endif %}
+      {% if settings.min_area %}· ab {{ settings.min_area|num }} m²{% endif %}</small>
+  </form>
+</section>
+
+<form class="filters" method="get">
+  <input type="hidden" name="passend" value="0">
+  <label><input type="checkbox" name="passend" value="1" {{ 'checked' if f.passend }}
+         onchange="this.form.submit()"> nur passende</label>
+  <label><input type="checkbox" name="inserate" value="1" {{ 'checked' if f.inserate }}
+         onchange="this.form.submit()"> nur Einzelinserate</label>
+  <label>Status
+    <select name="status" onchange="this.form.submit()">
+      <option value="aktiv" {{ 'selected' if f.status == 'aktiv' }}>alle außer ausgeblendet</option>
+      {% for s in statuses %}<option value="{{ s }}" {{ 'selected' if f.status == s }}>{{ s }}</option>{% endfor %}
+      <option value="" {{ 'selected' if f.status == '' }}>alle</option>
+    </select></label>
+  <label>Ort
+    <select name="ort" onchange="this.form.submit()">
+      <option value="">alle</option>
+      {% for p in places %}<option {{ 'selected' if f.ort == p }}>{{ p }}</option>{% endfor %}
+    </select></label>
+  <label>Sortierung
+    <select name="sort" onchange="this.form.submit()">
+      <option value="score" {{ 'selected' if f.sort == 'score' }}>Bewertung</option>
+      <option value="neu" {{ 'selected' if f.sort == 'neu' }}>neueste zuerst</option>
+      <option value="preis" {{ 'selected' if f.sort == 'preis' }}>Preis aufsteigend</option>
+    </select></label>
+</form>
+
+{% if not rows %}
+  <div class="empty">
+    Noch keine Treffer für diese Ansicht. Starte mit <b>„Jetzt suchen“</b> oder passe die
+    <a href="{{ url_for('settings_view') }}">Einstellungen</a> an.
+  </div>
+{% endif %}
+
+<div class="cards">
+{% for r in rows %}
+  <article class="card status-{{ r.status }} {{ 'nomatch' if not r.matches }}">
+    <div class="cardhead">
+      <span class="score" title="Bewertung 0–100">{{ r.score }}</span>
+      <a href="{{ r.link }}" target="_blank" rel="noopener noreferrer" class="title">{{ r.title }}</a>
+    </div>
+    <div class="facts">
+      <span>{{ r.place or 'Ort ?' }}</span>
+      <span>{{ r.price|eur }}</span>
+      <span>{{ r.rooms|num }} Zi.</span>
+      <span>{{ r.area|num }} m²</span>
+      <span class="domain">{{ r.domain }}</span>
+      {% if r.is_listing %}<span class="tag">Inserat</span>{% else %}<span class="tag grey">Übersicht</span>{% endif %}
+      {% if r.status == 'neu' %}<span class="tag new">neu</span>{% endif %}
+      {% if r.status == 'favorit' %}<span class="tag fav">★ Favorit</span>{% endif %}
+    </div>
+    {% if r.body %}<p class="body">{{ r.body }}</p>{% endif %}
+    {% if r.reasons %}<p class="reasons">{{ r.reasons }}</p>{% endif %}
+    <div class="actions">
+      {% for s in ['gesehen', 'favorit', 'ausgeblendet'] if s != r.status %}
+        <form method="post" action="{{ url_for('set_status', lid=r.id) }}">
+          <input type="hidden" name="status" value="{{ s }}">
+          <button>{{ {'gesehen': 'gesehen', 'favorit': '★ merken', 'ausgeblendet': 'ausblenden'}[s] }}</button>
+        </form>
+      {% endfor %}
+      <form method="post" action="{{ url_for('set_note', lid=r.id) }}" class="note">
+        <input name="note" value="{{ r.note }}" placeholder="Notiz (z. B. angeschrieben am …)">
+        <button>speichern</button>
+      </form>
+      <small class="seen">gefunden {{ r.first_seen[:16]|replace('T', ' ') }}</small>
+    </div>
+  </article>
+{% endfor %}
+</div>
+
+{% if f.status == 'ausgeblendet' and rows %}
+<form method="post" action="{{ url_for('cleanup') }}">
+  <button class="danger">Ausgeblendete Treffer endgültig löschen</button>
+</form>
+{% endif %}
+{% endblock %}

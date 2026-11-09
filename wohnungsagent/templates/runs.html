@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Protokoll{% endblock %}
+{% block content %}
+<h2>Suchläufe</h2>
+{% if not runs %}<div class="empty">Noch keine Suchläufe.</div>{% else %}
+<div class="tablewrap">
+<table class="runs">
+  <thead><tr><th>Start</th><th>Ende</th><th>Anfragen</th><th>Ergebnisse</th><th>neu</th><th>Fehler</th></tr></thead>
+  <tbody>
+  {% for r in runs %}
+    <tr>
+      <td>{{ r.started|replace('T', ' ') }}</td>
+      <td>{{ (r.finished or 'läuft …')|replace('T', ' ') }}</td>
+      <td>{{ r.queries }}</td><td>{{ r.results }}</td><td>{{ r.new_results }}</td>
+      <td>{% if r.errors %}<details><summary>{{ r.errors.count('\n') + 1 }} Fehler</summary><pre>{{ r.errors }}</pre></details>{% else %}–{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+{% endblock %}

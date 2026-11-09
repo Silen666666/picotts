@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen{% endblock %}
+{% block content %}
+<form method="post" class="settings">
+  <fieldset>
+    <legend>Suchkriterien</legend>
+    <label>Art
+      <select name="mode">
+        <option value="miete" {{ 'selected' if s.mode == 'miete' }}>Mieten</option>
+        <option value="kauf" {{ 'selected' if s.mode == 'kauf' }}>Kaufen</option>
+      </select></label>
+    <label>Höchstpreis in € <small>(Miete: monatlich)</small>
+      <input name="max_price" inputmode="decimal" value="{{ s.max_price if s.max_price is not none }}"></label>
+    <label>Mindestens Zimmer
+      <input name="min_rooms" inputmode="decimal" value="{{ s.min_rooms if s.min_rooms is not none }}"></label>
+    <label>Mindestfläche in m²
+      <input name="min_area" inputmode="decimal" value="{{ s.min_area if s.min_area is not none }}"></label>
+    <label>Zusätzliche Suchbegriffe <small>(z. B. „Balkon“ oder „Erdgeschoss“)</small>
+      <input name="extra_terms" value="{{ s.extra_terms }}"></label>
+    <label>Ausschlusswörter <small>(eins pro Zeile – Treffer gelten dann als unpassend)</small>
+      <textarea name="exclude_words" rows="3">{{ s.exclude_words|join('\n') }}</textarea></label>
+    <label>Pluswörter <small>(eins pro Zeile – erhöhen die Bewertung)</small>
+      <textarea name="include_words" rows="3">{{ s.include_words|join('\n') }}</textarea></label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Region</legend>
+    <label>Orte <small>(einer pro Zeile)</small>
+      <textarea name="places" rows="8">{{ s.places|join('\n') }}</textarea></label>
+    <p class="hint">Vorgabe mit Entfernungen (Luftlinie laut postleitzahl.org):
+      {% for p, km, _ in default_places %}{{ p }}{% if km %} ({{ km|num }} km){% endif %}{{ ', ' if not loop.last }}{% endfor %}.
+      Ortsteile von Schloß Holte-Stukenbrock (Liemke, Sende, Stukenbrock, Stukenbrock-Senne,
+      PLZ 33758) werden automatisch erkannt. Weitere Orte wie Bielefeld-Sennestadt, Gütersloh
+      oder Paderborn können einfach ergänzt werden.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Websuche</legend>
+    <label>Portale <small>(Domains, eine pro Zeile – gesucht wird per „site:“)</small>
+      <textarea name="domains" rows="5">{{ s.domains|join('\n') }}</textarea></label>
+    <label class="check"><input type="checkbox" name="general_query" {{ 'checked' if s.general_query }}>
+      zusätzlich ohne Portal-Filter suchen (findet z. B. Genossenschaften, Makler, Lokalzeitung)</label>
+    <label>Zeitraum der Suchergebnisse
+      <select name="timelimit">
+        {% for v, t in [('d','letzter Tag'),('w','letzte Woche'),('m','letzter Monat'),('y','letztes Jahr'),('','unbegrenzt')] %}
+        <option value="{{ v }}" {{ 'selected' if s.timelimit == v }}>{{ t }}</option>{% endfor %}
+      </select></label>
+    <label>Ergebnisse je Anfrage
+      <input name="max_results" type="number" min="1" max="50" value="{{ s.max_results_per_query }}"></label>
+    <label>Pause zwischen Anfragen in Sekunden
+      <input name="pause_seconds" inputmode="decimal" value="{{ s.pause_seconds }}"></label>
+    <label>Suchdienst
+      <select name="backend">
+        <option value="ddgs" {{ 'selected' if s.backend == 'ddgs' }}>ddgs (Metasuche, ohne Schlüssel)</option>
+        <option value="searxng" {{ 'selected' if s.backend == 'searxng' }}>eigene SearXNG-Instanz</option>
+      </select></label>
+    <label>SearXNG-URL <small>(nur bei SearXNG, z. B. http://localhost:8888)</small>
+      <input name="searxng_url" value="{{ s.searxng_url }}"></label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Agent</legend>
+    <label class="check"><input type="checkbox" name="agent_enabled" {{ 'checked' if s.agent_enabled }}>
+      automatisch regelmäßig suchen</label>
+    <label>Intervall in Minuten <small>(mind. 15)</small>
+      <input name="interval_minutes" type="number" min="15" value="{{ s.interval_minutes }}"></label>
+  </fieldset>
+
+  <button class="primary">Speichern</button>
+</form>
+
+<details class="queries">
+  <summary>{{ queries|length }} Suchanfragen pro Lauf anzeigen</summary>
+  <ul>{% for q in queries %}<li><code>{{ q }}</code></li>{% endfor %}</ul>
+</details>
+{% endblock %}

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Wohnungsagent{% endblock %} – Schloß Holte-Stukenbrock</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="top">
+  <div class="brand">Wohnungsagent <span>Schloß Holte-Stukenbrock &amp; Umgebung</span></div>
+  <nav>
+    <a href="{{ url_for('index') }}" class="{{ 'active' if request.endpoint == 'index' }}">Treffer</a>
+    <a href="{{ url_for('settings_view') }}" class="{{ 'active' if request.endpoint == 'settings_view' }}">Einstellungen</a>
+    <a href="{{ url_for('runs') }}" class="{{ 'active' if request.endpoint == 'runs' }}">Protokoll</a>
+  </nav>
+  <div class="agentstate" id="agentstate"
+       data-running="{{ 1 if agent.running else 0 }}">
+    {% if agent.running %}<span class="dot busy"></span> Suche läuft …
+    {% elif agent.next_run %}<span class="dot on"></span> Agent aktiv · nächster Lauf {{ agent.next_run }}
+    {% else %}<span class="dot off"></span> Agent pausiert{% endif %}
+  </div>
+</header>
+<main>
+  {% with msgs = get_flashed_messages() %}
+    {% for m in msgs %}<div class="flash">{{ m }}</div>{% endfor %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+<footer>
+  Werte (Preis, Zimmer, Fläche) werden aus Suchmaschinen-Kurztexten gelesen und können
+  fehlen oder veraltet sein – maßgeblich ist immer das Originalinserat.
+</footer>
+<script>
+// Während einer Suche Status abfragen und nach Abschluss neu laden.
+(function () {
+  const el = document.getElementById('agentstate');
+  let wasRunning = el.dataset.running === '1';
+  async function poll() {
+    try {
+      const r = await fetch('{{ url_for("status") }}');
+      const s = await r.json();
+      if (s.running) {
+        el.innerHTML = '<span class="dot busy"></span> ' +
+          (s.progress ? 'Suche ' + s.progress.replace(/</g, '&lt;') : 'Suche läuft …');
+        wasRunning = true;
+      } else if (wasRunning) {
+        location.reload();
+        return;
+      }
+    } catch (e) {}
+    setTimeout(poll, wasRunning ? 2000 : 30000);
+  }
+  setTimeout(poll, wasRunning ? 1000 : 30000);
+})();
+</script>
+</body>
+</html>
