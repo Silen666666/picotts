@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS listings (
     domain TEXT,
     place TEXT,
     price REAL,
+    cold REAL,
+    warm REAL,
+    warm_kind TEXT,
     rooms REAL,
     area REAL,
     is_listing INTEGER,
@@ -49,6 +52,7 @@ CREATE TABLE IF NOT EXISTS settings (
 
 DEFAULT_SETTINGS = {
     "mode": "miete",
+    "price_basis": "warm",          # bei Miete: Höchstpreis gilt für "warm" oder "kalt"
     "max_price": 900,
     "min_rooms": 2,
     "min_area": 50,
@@ -57,6 +61,7 @@ DEFAULT_SETTINGS = {
     "general_query": True,          # zusätzlich ohne site:-Filter suchen
     "exclude_words": ["Tausch", "Gesuch", "WBS erforderlich"],
     "include_words": ["Balkon", "Garten", "Stellplatz"],
+    "require_words": [],            # müssen im Treffer vorkommen (z. B. "Balkon")
     "extra_terms": "",
     "interval_minutes": 180,
     "agent_enabled": False,
@@ -78,6 +83,11 @@ class Storage:
         self._lock = threading.Lock()
         with self.conn() as c:
             c.executescript(SCHEMA)
+            # Datenbanken älterer Versionen um neue Spalten ergänzen
+            cols = {r["name"] for r in c.execute("PRAGMA table_info(listings)")}
+            for col, typ in (("cold", "REAL"), ("warm", "REAL"), ("warm_kind", "TEXT")):
+                if col not in cols:
+                    c.execute(f"ALTER TABLE listings ADD COLUMN {col} {typ}")
 
     @contextmanager
     def conn(self):
@@ -111,19 +121,23 @@ class Storage:
             ts = now()
             if row:
                 c.execute(
-                    """UPDATE listings SET title=?, body=?, place=?, price=?, rooms=?, area=?,
-                       is_listing=?, matches=?, score=?, reasons=?, last_seen=? WHERE id=?""",
-                    (data["title"], data["body"], data["place"], data["price"], data["rooms"],
-                     data["area"], data["is_listing"], data["matches"], data["score"],
-                     data["reasons"], ts, row["id"]),
+                    """UPDATE listings SET title=?, body=?, place=?, price=?, cold=?, warm=?,
+                       warm_kind=?, rooms=?, area=?, is_listing=?, matches=?, score=?, reasons=?,
+                       last_seen=? WHERE id=?""",
+                    (data["title"], data["body"], data["place"], data["price"], data["cold"],
+                     data["warm"], data["warm_kind"], data["rooms"], data["area"],
+                     data["is_listing"], data["matches"], data["score"], data["reasons"], ts,
+                     row["id"]),
                 )
                 return False
             c.execute(
-                """INSERT INTO listings (url, link, title, body, domain, place, price, rooms, area,
-                   is_listing, matches, score, reasons, query, first_seen, last_seen)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                """INSERT INTO listings (url, link, title, body, domain, place, price, cold, warm,
+                   warm_kind, rooms, area, is_listing, matches, score, reasons, query,
+                   first_seen, last_seen)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (data["url"], data["link"], data["title"], data["body"], data["domain"],
-                 data["place"], data["price"], data["rooms"], data["area"], data["is_listing"],
+                 data["place"], data["price"], data["cold"], data["warm"], data["warm_kind"],
+                 data["rooms"], data["area"], data["is_listing"],
                  data["matches"], data["score"], data["reasons"], data["query"], ts, ts),
             )
             return True
@@ -146,7 +160,7 @@ class Storage:
         order = {
             "score": "score DESC, first_seen DESC",
             "neu": "first_seen DESC",
-            "preis": "price IS NULL, price ASC",
+            "preis": "COALESCE(warm, cold, price) IS NULL, COALESCE(warm, cold, price) ASC",
         }.get(sort, "score DESC")
         sql = "SELECT * FROM listings"
         if where:
@@ -161,10 +175,11 @@ class Storage:
 
     def update_evaluation(self, listing_id: int, ev: dict) -> None:
         with self.conn() as c:
-            c.execute("UPDATE listings SET place=?, price=?, rooms=?, area=?, is_listing=?, "
-                      "matches=?, score=?, reasons=? WHERE id=?",
-                      (ev["place"], ev["price"], ev["rooms"], ev["area"], ev["is_listing"],
-                       ev["matches"], ev["score"], ev["reasons"], listing_id))
+            c.execute("UPDATE listings SET place=?, price=?, cold=?, warm=?, warm_kind=?, "
+                      "rooms=?, area=?, is_listing=?, matches=?, score=?, reasons=? WHERE id=?",
+                      (ev["place"], ev["price"], ev["cold"], ev["warm"], ev["warm_kind"],
+                       ev["rooms"], ev["area"], ev["is_listing"], ev["matches"], ev["score"],
+                       ev["reasons"], listing_id))
 
     def set_status(self, listing_id: int, status: str) -> None:
         with self.conn() as c:

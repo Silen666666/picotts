@@ -110,6 +110,7 @@ def create_app(db_path: str | None = None, search_func=None, start_agent=True) -
                 return redirect(url_for("settings_view"))
             storage.save_settings({
                 "mode": "kauf" if form.get("mode") == "kauf" else "miete",
+                "price_basis": "kalt" if form.get("price_basis") == "kalt" else "warm",
                 "max_price": _num(form.get("max_price")),
                 "min_rooms": _num(form.get("min_rooms")),
                 "min_area": _num(form.get("min_area")),
@@ -118,6 +119,7 @@ def create_app(db_path: str | None = None, search_func=None, start_agent=True) -
                 "general_query": form.get("general_query") == "on",
                 "exclude_words": _split_lines(form.get("exclude_words", "")),
                 "include_words": _split_lines(form.get("include_words", "")),
+                "require_words": _split_lines(form.get("require_words", "")),
                 "extra_terms": form.get("extra_terms", "").strip(),
                 "interval_minutes": max(15, int(_num(form.get("interval_minutes")) or 180)),
                 "agent_enabled": form.get("agent_enabled") == "on",

@@ -9,7 +9,7 @@
   <form method="post" action="{{ url_for('run_now') }}" class="runform">
     <button class="primary" {{ 'disabled' if agent.running }}>Jetzt suchen</button>
     <small>{{ settings.places|length }} Orte · {{ 'Miete' if settings.mode == 'miete' else 'Kauf' }}
-      {% if settings.max_price %}· bis {{ settings.max_price|eur }}{% endif %}
+      {% if settings.max_price %}· bis {{ settings.max_price|eur }}{% if settings.mode == 'miete' %} {{ settings.price_basis }}{% endif %}{% endif %}
       {% if settings.min_rooms %}· ab {{ settings.min_rooms|num }} Zi.{% endif %}
       {% if settings.min_area %}· ab {{ settings.min_area|num }} m²{% endif %}</small>
   </form>
@@ -56,7 +56,13 @@
     </div>
     <div class="facts">
       <span>{{ r.place or 'Ort ?' }}</span>
-      <span>{{ r.price|eur }}</span>
+      {% if settings.mode == 'miete' %}
+        {% set generic = r.price if (r.cold is none and r.price is not none and r.price != r.warm) else none %}
+        <span title="Kaltmiete">kalt {{ (r.cold if r.cold is not none else generic)|eur }}{% if generic is not none %}<sup title="ohne Angabe kalt/warm">?</sup>{% endif %}</span>
+        <span title="Warmmiete{{ ' – ' ~ r.warm_kind if r.warm_kind }}"><b>warm {{ r.warm|eur }}</b>{% if r.warm_kind and r.warm_kind != 'angegeben' %}<sup>*</sup>{% endif %}</span>
+      {% else %}
+        <span>{{ r.price|eur }}</span>
+      {% endif %}
       <span>{{ r.rooms|num }} Zi.</span>
       <span>{{ r.area|num }} m²</span>
       <span class="domain">{{ r.domain }}</span>
@@ -82,6 +88,11 @@
   </article>
 {% endfor %}
 </div>
+
+{% if rows and settings.mode == 'miete' %}
+<p class="hint">* Warmmiete berechnet aus Kaltmiete + Nebenkosten (+ Heizkosten, falls genannt).
+  „?“ = Preis ohne Angabe, ob kalt oder warm.</p>
+{% endif %}
 
 {% if f.status == 'ausgeblendet' and rows %}
 <form method="post" action="{{ url_for('cleanup') }}">

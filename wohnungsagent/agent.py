@@ -86,11 +86,13 @@ def criteria_from(settings: dict) -> Criteria:
         return float(v) if v not in (None, "") else None
     return Criteria(
         mode=settings["mode"],
+        price_basis=settings.get("price_basis", "warm"),
         max_price=num("max_price"),
         min_rooms=num("min_rooms"),
         min_area=num("min_area"),
         exclude_words=settings.get("exclude_words", []),
         include_words=settings.get("include_words", []),
+        require_words=settings.get("require_words", []),
     )
 
 
@@ -162,6 +164,9 @@ class Agent:
         return {
             "place": ev.place,
             "price": ev.price,
+            "cold": ev.cold,
+            "warm": ev.warm,
+            "warm_kind": ev.warm_kind,
             "rooms": ev.rooms,
             "area": ev.area,
             "is_listing": int(ev.is_listing),
@@ -201,8 +206,8 @@ class Agent:
         rows = self.storage.unnotified_matches()
         if not rows:
             return
-        lines = [f"{r['title']}\n  {r['place'] or '?'} | "
-                 f"{r['price'] or '?'} € | {r['rooms'] or '?'} Zi. | {r['area'] or '?'} m²\n"
+        lines = [f"{r['title']}\n  {r['place'] or '?'} | kalt {r['cold'] or r['price'] or '?'} € | "
+                 f"warm {r['warm'] or '?'} € | {r['rooms'] or '?'} Zi. | {r['area'] or '?'} m²\n"
                  f"  {r['link']}\n" for r in rows[:30]]
         msg = EmailMessage()
         msg["Subject"] = f"Wohnungsagent: {len(rows)} neue passende Treffer"

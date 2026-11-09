@@ -11,6 +11,15 @@
       </select></label>
     <label>Höchstpreis in € <small>(Miete: monatlich)</small>
       <input name="max_price" inputmode="decimal" value="{{ s.max_price if s.max_price is not none }}"></label>
+    <label>Höchstpreis gilt für <small>(nur bei Miete)</small>
+      <select name="price_basis">
+        <option value="warm" {{ 'selected' if s.price_basis == 'warm' }}>Warmmiete (inkl. Neben- und Heizkosten)</option>
+        <option value="kalt" {{ 'selected' if s.price_basis == 'kalt' }}>Kaltmiete</option>
+      </select></label>
+    <p class="hint">Warmmiete wird nur verwendet, wenn sie im Treffer steht oder sich aus Kaltmiete +
+      Nebenkosten berechnen lässt – sie wird nie geschätzt. Ist nur die Kaltmiete bekannt und liegt
+      sie schon über dem Höchstpreis, gilt der Treffer als zu teuer; sonst wird er mit dem Hinweis
+      „Warmmiete unbekannt“ angezeigt.</p>
     <label>Mindestens Zimmer
       <input name="min_rooms" inputmode="decimal" value="{{ s.min_rooms if s.min_rooms is not none }}"></label>
     <label>Mindestfläche in m²
@@ -19,6 +28,8 @@
       <input name="extra_terms" value="{{ s.extra_terms }}"></label>
     <label>Ausschlusswörter <small>(eins pro Zeile – Treffer gelten dann als unpassend)</small>
       <textarea name="exclude_words" rows="3">{{ s.exclude_words|join('\n') }}</textarea></label>
+    <label>Pflichtmerkmale <small>(eins pro Zeile – müssen im Treffer vorkommen, z. B. „Balkon“, „EBK“)</small>
+      <textarea name="require_words" rows="2">{{ s.require_words|join('\n') }}</textarea></label>
     <label>Pluswörter <small>(eins pro Zeile – erhöhen die Bewertung)</small>
       <textarea name="include_words" rows="3">{{ s.include_words|join('\n') }}</textarea></label>
   </fieldset>

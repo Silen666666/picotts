@@ -129,3 +129,56 @@ def test_web_interface(tmp_path):
     lid = app.config["agent"].storage.list_listings()[0]["id"]
     assert client.post(f"/listing/{lid}/status", data={"status": "favorit"}).status_code == 302
     assert client.get("/status").get_json()["counts"]["favoriten"] == 1
+
+
+def test_extract_rent():
+    from extractor import extract_rent
+    r = extract_rent("Kaltmiete 780 €, Nebenkosten 150 €, Heizkosten 70 €")
+    assert (r.cold, r.warm, r.warm_kind) == (780, 1000, "berechnet")
+    r = extract_rent("Kaltmiete: 650,00 € zzgl. NK 120 €")
+    assert (r.cold, r.warm, r.warm_kind) == (650, 770, "berechnet ohne Heizkosten")
+    r = extract_rent("Warmmiete 940 € | 3 Zimmer | 75 m²")
+    assert (r.cold, r.warm, r.warm_kind) == (None, 940, "angegeben")
+    r = extract_rent("820 € warm, 680 € kalt")
+    assert (r.cold, r.warm) == (680, 820)
+    r = extract_rent("Miete 700 €, Warmwasser über Durchlauferhitzer")
+    assert (r.cold, r.warm) == (None, None)
+
+
+def test_price_basis_warm_and_cold():
+    from extractor import _check_price, extract_rent
+    warm = Criteria(max_price=900, price_basis="warm")
+    cold = Criteria(max_price=900, price_basis="kalt")
+    assert _check_price(warm, None, extract_rent("Warmmiete 950 €"))[0] is False
+    assert _check_price(warm, None, extract_rent("Warmmiete 880 €"))[0] is True
+    # nur Kaltmiete bekannt: unter Limit -> unbekannt, über Limit -> sicher zu teuer
+    assert _check_price(warm, None, extract_rent("Kaltmiete 700 €"))[0] is None
+    assert _check_price(warm, None, extract_rent("Kaltmiete 950 €"))[0] is False
+    # berechnete Warmmiete ohne Heizkosten über Limit -> sicher zu teuer
+    assert _check_price(warm, None, extract_rent("Kaltmiete 800 €, NK 150 €"))[0] is False
+    assert _check_price(cold, None, extract_rent("Kaltmiete 800 €, NK 150 €"))[0] is True
+    assert _check_price(cold, None, extract_rent("Warmmiete 850 €"))[0] is True
+    assert _check_price(cold, 950, extract_rent("Miete 950 €"))[0] is False
+
+
+def test_require_words():
+    crit = Criteria(require_words=["Balkon"])
+    t = FAKE_RESULTS[0]
+    assert evaluate(t["title"], t["body"], t["url"], crit, PLACES, DISTRICTS).matches
+    t = FAKE_RESULTS[1]
+    assert not evaluate(t["title"], t["body"], t["url"], crit, PLACES, DISTRICTS).matches
+
+
+def test_old_database_is_migrated(tmp_path):
+    import sqlite3
+    db = tmp_path / "alt.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE listings (id INTEGER PRIMARY KEY, url TEXT UNIQUE, link TEXT, "
+                "title TEXT, body TEXT, domain TEXT, place TEXT, price REAL, rooms REAL, "
+                "area REAL, is_listing INTEGER, matches INTEGER, score INTEGER, reasons TEXT, "
+                "query TEXT, status TEXT DEFAULT 'neu', note TEXT DEFAULT '', first_seen TEXT, "
+                "last_seen TEXT, notified INTEGER DEFAULT 0)")
+    con.commit(); con.close()
+    storage = Storage(str(db))
+    Agent(storage, search_func=lambda q: FAKE_RESULTS).run_once()
+    assert storage.list_listings(only_matches=False)

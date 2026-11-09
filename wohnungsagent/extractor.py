@@ -75,6 +75,66 @@ def extract_price(text: str, mode: str = "miete") -> float | None:
     return None
 
 
+# ---- Kalt-/Warmmiete und Nebenkosten ----------------------------------------
+_AMT = r"(\d{1,3}(?:\.\d{3})+|\d+)(?:,(?:\d{1,2}|-{1,2}))?"
+_PRE = r"\s*[:=]?\s*(?:ca\.?|rd\.?|von|nur)?\s*(?:€|eur)?\s*"
+_EUR = r"\s*(?:€|eur\b|euro\b)"
+
+WARM_LABELS = r"warmmiete|gesamtmiete|bruttowarmmiete|bruttomiete|miete\s+warm|warm"
+COLD_LABELS = r"nettokaltmiete|kaltmiete|grundmiete|nettomiete|miete\s+kalt|kalt"
+NK_LABELS = r"nebenkosten|betriebskosten|nk|bk"
+HEAT_LABELS = r"heizkosten|hk"
+
+WARM_RE = [re.compile(rf"(?<![a-zäöü])(?:{WARM_LABELS}){_PRE}{_AMT}", re.I),
+           re.compile(rf"{_AMT}{_EUR}?\s*\(?\s*(?:warm|inkl\.?|inklusive|gesamt)\b", re.I)]
+COLD_RE = [re.compile(rf"(?<![a-zäöü])(?:{COLD_LABELS}){_PRE}{_AMT}", re.I),
+           re.compile(rf"{_AMT}{_EUR}?\s*\(?\s*(?:kalt|zzgl\.?|zuzüglich|netto)\b", re.I)]
+NK_RE = [re.compile(rf"(?<![a-zäöü])(?:{NK_LABELS})(?:-?vorauszahlung)?{_PRE}{_AMT}", re.I)]
+HEAT_RE = [re.compile(rf"(?<![a-zäöü])(?:{HEAT_LABELS}){_PRE}{_AMT}", re.I)]
+
+
+def _first_amount(patterns, text: str, lo: float, hi: float) -> float | None:
+    hits = []
+    for pat in patterns:
+        for m in pat.finditer(text):
+            try:
+                value = _to_number(m.group(1))
+            except ValueError:
+                continue
+            if lo <= value <= hi:
+                hits.append((m.start(), value))
+    return min(hits)[1] if hits else None
+
+
+@dataclass
+class Rent:
+    cold: float | None = None        # Kaltmiete (ausdrücklich genannt)
+    warm: float | None = None        # Warmmiete (genannt oder berechnet)
+    warm_kind: str | None = None     # "angegeben" | "berechnet" | "berechnet ohne Heizkosten"
+    extra: float | None = None       # Nebenkosten (+ Heizkosten)
+
+
+def extract_rent(text: str) -> Rent:
+    """Liest Kaltmiete, Warmmiete und Nebenkosten aus einem Text.
+
+    Warmmiete wird nur angegeben, wenn sie genannt ist oder sich aus
+    Kaltmiete + Nebenkosten (+ Heizkosten) berechnen lässt – nie geschätzt.
+    """
+    r = Rent()
+    r.cold = _first_amount(COLD_RE, text, 100, 5000)
+    warm = _first_amount(WARM_RE, text, 100, 6000)
+    nk = _first_amount(NK_RE, text, 10, 1500)
+    heat = _first_amount(HEAT_RE, text, 10, 800)
+    if nk is not None or heat is not None:
+        r.extra = (nk or 0) + (heat or 0)
+    if warm is not None and (r.cold is None or warm >= r.cold):
+        r.warm, r.warm_kind = warm, "angegeben"
+    elif r.cold is not None and nk is not None:
+        r.warm = r.cold + nk + (heat or 0)
+        r.warm_kind = "berechnet" if heat is not None else "berechnet ohne Heizkosten"
+    return r
+
+
 def extract_rooms(text: str) -> float | None:
     for m in ROOMS_RE.finditer(text):
         value = float(m.group(1).replace(",", "."))
@@ -114,16 +174,21 @@ def is_listing_url(url: str) -> bool:
 @dataclass
 class Criteria:
     mode: str = "miete"              # "miete" oder "kauf"
+    price_basis: str = "warm"        # bei Miete: "warm" oder "kalt"
     max_price: float | None = None
     min_rooms: float | None = None
     min_area: float | None = None
     exclude_words: list[str] = field(default_factory=list)
     include_words: list[str] = field(default_factory=list)
+    require_words: list[str] = field(default_factory=list)
 
 
 @dataclass
 class Evaluation:
     price: float | None
+    cold: float | None
+    warm: float | None
+    warm_kind: str | None
     rooms: float | None
     area: float | None
     place: str | None
@@ -138,6 +203,7 @@ def evaluate(title: str, body: str, url: str, criteria: Criteria,
     text = f"{title} \n {body}"
     norm = normalize(text)
     price = extract_price(text, criteria.mode)
+    rent = extract_rent(text) if criteria.mode == "miete" else Rent()
     rooms = extract_rooms(text)
     area = extract_area(text)
     place = detect_place(f"{text} {url}", places, districts)
@@ -154,14 +220,15 @@ def evaluate(title: str, body: str, url: str, criteria: Criteria,
         score += 10
 
     if criteria.max_price is not None:
-        if price is None:
+        ok, reason = _check_price(criteria, price, rent)
+        if ok is None:
             score -= 5
-            reasons.append("Preis unbekannt")
-        elif price > criteria.max_price:
-            matches = False
-            reasons.append(f"Preis {price:.0f} € > {criteria.max_price:.0f} €")
-        else:
+        elif ok:
             score += 15
+        else:
+            matches = False
+        if reason:
+            reasons.append(reason)
     if criteria.min_rooms is not None:
         if rooms is None:
             score -= 5
@@ -185,6 +252,10 @@ def evaluate(title: str, body: str, url: str, criteria: Criteria,
         if word and normalize(word) in norm:
             matches = False
             reasons.append(f"Ausschlusswort „{word}“")
+    for word in criteria.require_words:
+        if word and normalize(word) not in norm:
+            matches = False
+            reasons.append(f"Pflichtmerkmal „{word}“ nicht erwähnt")
     for word in criteria.include_words:
         if word and normalize(word) in norm:
             score += 5
@@ -198,5 +269,49 @@ def evaluate(title: str, body: str, url: str, criteria: Criteria,
         score -= 10
         reasons.append("Übersichts-/Suchseite, kein Einzelinserat")
 
-    return Evaluation(price, rooms, area, place, listing, matches,
-                      max(0, min(100, score)), reasons)
+    return Evaluation(price, rent.cold, rent.warm, rent.warm_kind, rooms, area, place,
+                      listing, matches, max(0, min(100, score)), reasons)
+
+
+def _eur(v: float) -> str:
+    return f"{v:,.0f} €".replace(",", ".")
+
+
+def _check_price(c: Criteria, price: float | None, rent: Rent) -> tuple[bool | None, str]:
+    """(True=passt, False=zu teuer, None=unbekannt) und Begründung.
+
+    Ausgeschlossen wird nur, was sicher zu teuer ist: Warmmiete >= Kaltmiete,
+    ein Preis ohne Angabe ist also in jedem Fall eine untere Grenze der Warmmiete.
+    """
+    limit = c.max_price
+    if c.mode != "miete":
+        if price is None:
+            return None, "Preis unbekannt"
+        return (price <= limit), ("" if price <= limit else f"Preis {_eur(price)} > {_eur(limit)}")
+
+    if c.price_basis == "warm":
+        if rent.warm is not None:
+            note = "" if rent.warm_kind == "angegeben" else f" ({rent.warm_kind})"
+            if rent.warm > limit:
+                return False, f"Warmmiete {_eur(rent.warm)}{note} > {_eur(limit)}"
+            if rent.warm_kind == "berechnet ohne Heizkosten":
+                return True, "Warmmiete ohne Heizkosten berechnet"
+            return True, ""
+        lower = rent.cold if rent.cold is not None else price
+        if lower is not None and lower > limit:
+            return False, f"schon {'Kaltmiete' if rent.cold else 'Preis'} {_eur(lower)} > {_eur(limit)} warm"
+        if rent.cold is not None:
+            return None, f"Warmmiete unbekannt (Kaltmiete {_eur(rent.cold)})"
+        if price is not None:
+            return None, f"Warmmiete unbekannt ({_eur(price)} ohne Angabe kalt/warm)"
+        return None, "Preis unbekannt"
+
+    # Kaltmiete als Maßstab
+    cold = rent.cold if rent.cold is not None else price
+    if cold is not None:
+        if cold > limit:
+            return False, f"Kaltmiete {_eur(cold)} > {_eur(limit)}"
+        return True, "" if rent.cold is not None else "Preis ohne Angabe kalt/warm"
+    if rent.warm is not None and rent.warm <= limit:
+        return True, "nur Warmmiete bekannt"
+    return None, "Kaltmiete unbekannt"

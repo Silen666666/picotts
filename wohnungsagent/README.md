@@ -12,9 +12,14 @@ Kriterien, speichert sie und zeigt sie in einem Webinterface im Browser an.
 - **Portale** werden per `site:`-Filter durchsucht (Vorgabe: immobilienscout24.de,
   immowelt.de, kleinanzeigen.de, wg-gesucht.de), dazu kommt eine freie Suche ohne Filter.
   Die Portale selbst werden nicht automatisiert abgerufen (Scraping).
-- **Auswertung** von Preis, Zimmerzahl, Wohnfläche und Ort aus Titel und Kurztext der Treffer,
-  Abgleich mit Höchstpreis, Mindestzimmern, Mindestfläche, Ausschluss- und Pluswörtern,
-  Bewertung von 0 bis 100.
+- **Auswertung** von Kaltmiete, Warmmiete, Nebenkosten, Zimmerzahl, Wohnfläche und Ort aus
+  Titel und Kurztext der Treffer, Abgleich mit Höchstpreis, Mindestzimmern, Mindestfläche,
+  Pflicht-, Ausschluss- und Pluswörtern, Bewertung von 0 bis 100.
+- **Warm- oder Kaltmiete als Maßstab** (Einstellung „Höchstpreis gilt für“). Die Warmmiete
+  wird nur verwendet, wenn sie genannt ist oder sich aus Kaltmiete + Nebenkosten
+  (+ Heizkosten) berechnen lässt, sie wird nie geschätzt. Ein Treffer gilt nur dann als
+  zu teuer, wenn das sicher ist (z. B. liegt schon die Kaltmiete über der Warmmiete-Grenze).
+  Sonst wird er mit „Warmmiete unbekannt“ angezeigt.
 - **Duplikaterkennung** über bereinigte URLs, Status je Treffer (neu, gesehen, Favorit,
   ausgeblendet) und eigene Notizen.
 - **Agent-Modus**: automatische Suche im einstellbaren Intervall (mindestens 15 Minuten),
