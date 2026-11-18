@@ -11,4 +11,4 @@ packages:
   basis: !include common/raumsensor.yaml
   bedienung: !include
     file: common/raumsensor_display.yaml
-    vars: { zone: wohnen, taste_plus: GPIO6, taste_minus: GPIO7 }
+    vars: { ha_raum: wohnen, taste_plus: GPIO6, taste_minus: GPIO7 }

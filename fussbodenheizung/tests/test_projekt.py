@@ -80,6 +80,19 @@ class TestKonsistenz(unittest.TestCase):
             self.assertIn("fbh_%s_komfort" % z, p["input_number"])
             self.assertIn("fbh_%s_absenk" % z, p["input_number"])
 
+    def test_entity_ids_mit_umlauten(self):
+        self.assertEqual(ha.slug("FBH Zentrale Küche"), "fbh_zentrale_kuche")
+        self.assertEqual(ha.slug("FBH Zentrale Wärmeanforderung"), "fbh_zentrale_warmeanforderung")
+        self.assertEqual(ha.klima("buero"), "climate.fbh_zentrale_buro")
+
+    def test_display_variable_passt_zu_ha(self):
+        # Raumsensoren mit Display: ha_raum muss dem HA-Slug des Raumnamens entsprechen
+        for z, name, *_ in ha.ZONEN:
+            sensor = lade("esphome/fbh-sensor-%s.yaml" % z)
+            bed = sensor["packages"].get("bedienung")
+            if bed:
+                self.assertEqual(bed["vars"]["ha_raum"], ha.slug(name))
+
     def test_statustext_identisch(self):
         # Automation "Fühlerausfall melden" muss exakt den Text aus zone.yaml treffen
         with open(os.path.join(BASIS, "esphome/common/zone.yaml"), encoding="utf-8") as f:

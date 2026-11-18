@@ -25,7 +25,7 @@ views:
         name: Ventil (Stellgrad)
       - entity: sensor.fbh_zentrale_status_wohnen
         name: Status
-      - entity: sensor.fbh_sensor_wohnen_luftfeuchte
+      - entity: sensor.raumsensor_wohnen_luftfeuchte
         name: Luftfeuchte
       - entity: input_number.fbh_wohnen_komfort
         name: Komfort
@@ -36,15 +36,15 @@ views:
   - type: vertical-stack
     cards:
     - type: thermostat
-      entity: climate.fbh_zentrale_kueche
+      entity: climate.fbh_zentrale_kuche
       name: Küche
     - type: entities
       entities:
-      - entity: sensor.fbh_zentrale_stellgrad_kueche
+      - entity: sensor.fbh_zentrale_stellgrad_kuche
         name: Ventil (Stellgrad)
-      - entity: sensor.fbh_zentrale_status_kueche
+      - entity: sensor.fbh_zentrale_status_kuche
         name: Status
-      - entity: sensor.fbh_sensor_kueche_luftfeuchte
+      - entity: sensor.raumsensor_kuche_luftfeuchte
         name: Luftfeuchte
       - entity: input_number.fbh_kueche_komfort
         name: Komfort
@@ -63,7 +63,7 @@ views:
         name: Ventil (Stellgrad)
       - entity: sensor.fbh_zentrale_status_bad
         name: Status
-      - entity: sensor.fbh_sensor_bad_luftfeuchte
+      - entity: sensor.raumsensor_bad_luftfeuchte
         name: Luftfeuchte
       - entity: input_number.fbh_bad_komfort
         name: Komfort
@@ -82,7 +82,7 @@ views:
         name: Ventil (Stellgrad)
       - entity: sensor.fbh_zentrale_status_schlafen
         name: Status
-      - entity: sensor.fbh_sensor_schlafen_luftfeuchte
+      - entity: sensor.raumsensor_schlafen_luftfeuchte
         name: Luftfeuchte
       - entity: input_number.fbh_schlafen_komfort
         name: Komfort
@@ -101,7 +101,7 @@ views:
         name: Ventil (Stellgrad)
       - entity: sensor.fbh_zentrale_status_kind
         name: Status
-      - entity: sensor.fbh_sensor_kind_luftfeuchte
+      - entity: sensor.raumsensor_kind_luftfeuchte
         name: Luftfeuchte
       - entity: input_number.fbh_kind_komfort
         name: Komfort
@@ -112,15 +112,15 @@ views:
   - type: vertical-stack
     cards:
     - type: thermostat
-      entity: climate.fbh_zentrale_buero
+      entity: climate.fbh_zentrale_buro
       name: Büro
     - type: entities
       entities:
-      - entity: sensor.fbh_zentrale_stellgrad_buero
+      - entity: sensor.fbh_zentrale_stellgrad_buro
         name: Ventil (Stellgrad)
-      - entity: sensor.fbh_zentrale_status_buero
+      - entity: sensor.fbh_zentrale_status_buro
         name: Status
-      - entity: sensor.fbh_sensor_buero_luftfeuchte
+      - entity: sensor.raumsensor_buro_luftfeuchte
         name: Luftfeuchte
       - entity: input_number.fbh_buero_komfort
         name: Komfort
@@ -133,8 +133,8 @@ views:
     hours_to_show: 24
     entities:
     - climate.fbh_zentrale_wohnen
-    - climate.fbh_zentrale_kueche
+    - climate.fbh_zentrale_kuche
     - climate.fbh_zentrale_bad
     - climate.fbh_zentrale_schlafen
     - climate.fbh_zentrale_kind
-    - climate.fbh_zentrale_buero
+    - climate.fbh_zentrale_buro

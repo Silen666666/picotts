@@ -185,10 +185,10 @@ Feldleitung (Vorschlag, Auslegung durch die Elektrofachkraft): **2 × NYM‑J 7�
    * `climate.fbh_zentrale_wohnen`
    * `sensor.fbh_zentrale_stellgrad_wohnen`
    * `sensor.fbh_zentrale_status_wohnen`
-   * `sensor.fbh_sensor_wohnen_luftfeuchte`
+   * `sensor.raumsensor_wohnen_luftfeuchte`
    * `binary_sensor.fbh_zentrale_warmeanforderung`
 
-   HA bildet sie aus Geräte‑ und Entitätsnamen. Weichen sie ab, in HA umbenennen oder `tools/erzeuge_homeassistant.py` anpassen und neu erzeugen.
+   HA bildet sie aus Geräte‑ und Entitätsnamen; Umlaute verlieren dabei die Punkte („Küche“ → `climate.fbh_zentrale_kuche`, „Büro“ → `…_buro`). Der Generator rechnet das genauso um. Weichen die IDs trotzdem ab (z.B. weil HA schon eine gleichnamige Entität kannte und `_2` anhängt), in HA umbenennen oder `tools/erzeuge_homeassistant.py` anpassen und neu erzeugen.
 
 **Räume ändern:** An drei Stellen anpassen und danach `python3 -m unittest discover -s tests` laufen lassen; der Test prüft, dass alles zusammenpasst.
 1. `fbh-zentrale.yaml`: `packages` und `providers`
@@ -234,7 +234,7 @@ Die Spitzen kommen vom Aufheizen nach der Nachtabsenkung, die beim trägen Estri
 | Kompilierung für ESP32‑S3 | **nicht möglich**: Die Umgebung darf dl.espressif.com (ESP‑IDF) nicht laden |
 | Kompilierung der Zonenlogik auf ESPHome‑„host“ (Linux) | erfolgreich; alle C++‑Lambdas übersetzen |
 | Ende‑zu‑Ende‑Test auf „host“: simulierter Raumsensor → verschlüsseltes UDP → Zentrale | ohne Sensor 30 % „Fühlerausfall“; mit 19 °C bei Soll 21 °C → 100 % „Regelung“; Sensor weg → zurück in den Ersatzbetrieb (Timeout für den Test auf 20 s verkürzt) |
-| `tests/test_projekt.py` (11 Tests) | OK |
+| `tests/test_projekt.py` (13 Tests) | OK |
 | Home‑Assistant‑Paket | siehe Hinweis in Kap. 11 |
 
 Die erste Kompilierung für das echte Board erfolgt also bei Ihnen im ESPHome‑Add‑on.

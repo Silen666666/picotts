@@ -312,19 +312,25 @@ automation:
   actions:
   - repeat:
       for_each:
-      - wohnen
-      - kueche
-      - bad
-      - schlafen
-      - kind
-      - buero
+      - zone: wohnen
+        klima: climate.fbh_zentrale_wohnen
+      - zone: kueche
+        klima: climate.fbh_zentrale_kuche
+      - zone: bad
+        klima: climate.fbh_zentrale_bad
+      - zone: schlafen
+        klima: climate.fbh_zentrale_schlafen
+      - zone: kind
+        klima: climate.fbh_zentrale_kind
+      - zone: buero
+        klima: climate.fbh_zentrale_buro
       sequence:
       - variables:
-          komfort: "{{ is_state('schedule.fbh_' ~ repeat.item, 'on') and not is_state('input_boolean.fbh_abwesend',\
+          komfort: "{{ is_state('schedule.fbh_' ~ repeat.item.zone, 'on') and not is_state('input_boolean.fbh_abwesend',\
             \ 'on') }}"
-          soll: "{{ states('input_number.fbh_' ~ repeat.item ~ ('_komfort' if komfort else '_absenk'))\
+          soll: "{{ states('input_number.fbh_' ~ repeat.item.zone ~ ('_komfort' if komfort else '_absenk'))\
             \ | float(20) }}"
-          ziel: "climate.fbh_zentrale_{{ repeat.item }}"
+          ziel: "{{ repeat.item.klima }}"
       - condition: template
         value_template: "{{ states(ziel) not in ['unavailable', 'unknown'] }}"
       - action: climate.set_temperature
@@ -339,11 +345,11 @@ automation:
   - trigger: state
     entity_id:
     - sensor.fbh_zentrale_status_wohnen
-    - sensor.fbh_zentrale_status_kueche
+    - sensor.fbh_zentrale_status_kuche
     - sensor.fbh_zentrale_status_bad
     - sensor.fbh_zentrale_status_schlafen
     - sensor.fbh_zentrale_status_kind
-    - sensor.fbh_zentrale_status_buero
+    - sensor.fbh_zentrale_status_buro
     to: Fühlerausfall (Ersatzbetrieb 30 %)
     for: "00:05:00"
   actions:

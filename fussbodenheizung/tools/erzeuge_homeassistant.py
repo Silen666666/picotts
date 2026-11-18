@@ -30,22 +30,42 @@ ZONEN = [
 WERKTAGE = ["monday", "tuesday", "wednesday", "thursday", "friday"]
 WOCHENENDE = ["saturday", "sunday"]
 
-# Entity-IDs, wie Home Assistant sie aus den ESPHome-Namen bildet
-# (Gerät "FBH Zentrale" + Entität "<Name>"). Nach dem Einbinden prüfen!
+def slug(text):
+    """Wie Home Assistant Entity-IDs bildet (homeassistant.util.slugify):
+    Umlaute -> Grundvokal (ü -> u), ß -> ss, alles andere -> '_'."""
+    t = text.lower()
+    for a, b in (("ä", "a"), ("ö", "o"), ("ü", "u"), ("ß", "ss")):
+        t = t.replace(a, b)
+    out, unter = [], False
+    for c in t:
+        if c.isascii() and c.isalnum():
+            out.append(c)
+            unter = False
+        elif not unter:
+            out.append("_")
+            unter = True
+    return "".join(out).strip("_")
+
+
+NAMEN = {z[0]: z[1] for z in ZONEN}
+
+
+# Entity-IDs, wie Home Assistant sie aus den ESPHome-Namen bildet:
+# Gerät "FBH Zentrale" bzw. "Raumsensor <Name>" + Entitätsname.
 def klima(z):
-    return "climate.fbh_zentrale_%s" % z
+    return "climate." + slug("FBH Zentrale " + NAMEN[z])
 
 
 def status(z):
-    return "sensor.fbh_zentrale_status_%s" % z
+    return "sensor." + slug("FBH Zentrale Status " + NAMEN[z])
 
 
 def stellgrad(z):
-    return "sensor.fbh_zentrale_stellgrad_%s" % z
+    return "sensor." + slug("FBH Zentrale Stellgrad " + NAMEN[z])
 
 
 def feuchte(z):
-    return "sensor.fbh_sensor_%s_luftfeuchte" % z
+    return "sensor." + slug("Raumsensor %s Luftfeuchte" % NAMEN[z])
 
 
 def zeiten(liste):
@@ -93,14 +113,14 @@ def paket():
                         "state": "on"}],
         "actions": [{
             "repeat": {
-                "for_each": zonen,
+                "for_each": [{"zone": z, "klima": klima(z)} for z in zonen],
                 "sequence": [
                     {"variables": {
-                        "komfort": "{{ is_state('schedule.fbh_' ~ repeat.item, 'on') and "
+                        "komfort": "{{ is_state('schedule.fbh_' ~ repeat.item.zone, 'on') and "
                                    "not is_state('input_boolean.fbh_abwesend', 'on') }}",
-                        "soll": "{{ states('input_number.fbh_' ~ repeat.item ~ "
+                        "soll": "{{ states('input_number.fbh_' ~ repeat.item.zone ~ "
                                 "('_komfort' if komfort else '_absenk')) | float(20) }}",
-                        "ziel": "climate.fbh_zentrale_{{ repeat.item }}",
+                        "ziel": "{{ repeat.item.klima }}",
                     }},
                     {"condition": "template",
                      "value_template": "{{ states(ziel) not in ['unavailable', 'unknown'] }}"},
@@ -145,7 +165,7 @@ def dashboard():
     karten = [{
         "type": "entities", "title": "Fußbodenheizung",
         "entities": ["input_boolean.fbh_zeitprogramm", "input_boolean.fbh_abwesend",
-                     "binary_sensor.fbh_zentrale_warmeanforderung"]}]
+                     "binary_sensor." + slug("FBH Zentrale Wärmeanforderung")]}]
     for z, name, *_ in ZONEN:
         karten.append({"type": "vertical-stack", "cards": [
             {"type": "thermostat", "entity": klima(z), "name": name},
