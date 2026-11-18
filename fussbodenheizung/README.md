@@ -16,7 +16,8 @@ Einzelraumregelung für eine wassergeführte Fußbodenheizung:
 |---|---|
 | `stueckliste.csv` | Stückliste (Semikolon‑getrennt, in Excel/LibreOffice öffnen) |
 | `docs/systemuebersicht.svg` | Blockschaltbild Gesamtsystem |
-| `docs/stromlaufplan.svg` | Stromlaufplan UV (230 V + 24 V) |
+| `docs/stromlaufplan.svg` | Stromlaufplan UV (230 V + 24 V), Zentrale ESP32 |
+| `docs/stromlaufplan_esp32s3.svg` | dto. mit ESP32‑S3‑Board als Zentrale |
 | `docs/hutschiene.svg` | Belegung der Hutschienen (Teilungseinheiten) |
 | `firmware/zentrale/` | `main.py`, `config.py`, `regler.py` für den ESP32 in der UV |
 | `firmware/raumsensor/` | `main.py`, `config.py`, `sht40.py` für jeden Raumsensor |
@@ -125,6 +126,25 @@ Die 24‑V‑Leitungen in der UV ebenfalls mit Aderisolierung für 300/500 V (H0
 * **Versorgung:** USB‑Netzteil 5 V (empfohlen). Batteriebetrieb ist mit `INTERVALL_S = 300` möglich, Laufzeit aber nicht gemessen – vorher testen.
 * **Genauigkeit SHT40:** typ. ±0,2 °C, max. ±0,4 °C (0…65 °C) [Q3]. Mit Referenzthermometer abgleichen (`OFFSET_K`).
 
+### 4.6 Alternative Zentrale: ESP32‑S3‑Board (z.B. YD‑ESP32‑S3 N16R8 mit IPEX‑Antenne)
+
+Funktioniert ebenfalls – ESP‑NOW ist auf ESP32 und ESP32‑S3 dasselbe Protokoll, die Raumsensoren (ESP32‑C3) bleiben unverändert. Nötige Anpassungen:
+
+1. In `firmware/zentrale/config.py` **`BOARD = "ESP32-S3"`** setzen. Pinbelegung dann:
+
+   | Funktion | ESP32‑S3‑GPIO |
+   |---|---|
+   | K1 … K8 (ULN2803A A2 Pin 1…8) | 4, 5, 6, 7, 15, 16, 17, 18 |
+   | K9 Wärmeanforderung (A3 Pin 1) | 8 |
+   | Status‑LED (extern, 330 Ω) | 9 |
+
+   Gemieden werden: Strapping‑Pins 0, 3, 45, 46 [Q8]; USB 19/20; Flash 26…32; **Octal‑PSRAM 33…37** beim N16R8 (laut Espressif/YD‑Doku nicht nutzbar) [Q8][Q9]; UART0 43/44 (Konsole); GPIO48 (WS2812‑RGB‑LED auf dem YD‑Board) [Q9]. Stromlaufplan dafür: `docs/stromlaufplan_esp32s3.svg`.
+2. **Firmware:** MicroPython „ESP32_GENERIC_S3“, Variante **SPIRAM_OCT** (für Octal‑PSRAM) [Q10]; Flash‑Offset beim S3 `0x0`. Nach dem Flashen im REPL `import espnow` testen.
+3. **Antenne:** Das Standard‑YD‑Board nutzt die PCB‑Antenne des Moduls [Q9]. Bei Varianten mit IPEX‑Buchse wird häufig per **0‑Ω‑Brücke** zwischen PCB‑ und IPEX‑Antenne umgeschaltet [Q11] – für dieses Board nicht verifiziert: vor dem Einbau nachsehen bzw. Händler fragen und Reichweite mit/ohne Antenne vergleichen.
+4. **Versorgung:** 5 V vom DC/DC (U1) an den **5V‑Pin**, GND an G. Beim Programmieren über USB die 24‑V‑Versorgung abschalten, solange nicht geklärt ist, ob das Board eine Rückspeise‑Diode hat (Schaltplan des Boards prüfen).
+5. **Montage in der UV:** Der Schraubklemmen‑Adapter ist nicht hutschienenfähig → auf Hutschienen‑Leiterplattenhalter (z.B. Profilträger für Leiterplatten) oder in ein ausreichend großes Hutschienengehäuse setzen; berührungssicher hinter der UV‑Abdeckung. Die Schraubklemmen erleichtern die Verdrahtung zur ULN2803‑Platine.
+6. Für die **Raumsensoren** ist das S3‑Board unnötig groß und erwärmt sich stärker – dort beim ESP32‑C3 bleiben.
+
 ## 5. Software aufspielen
 
 1. MicroPython‑Firmware von micropython.org herunterladen (Board „ESP32 / Generic“ für die Zentrale, „ESP32‑C3“ für die Sensoren). ESP‑NOW ist in den offiziellen ESP32‑Builds enthalten [Q4].
@@ -195,4 +215,8 @@ Q1 B6: Dauerlast < 0,1 A, Einschaltspitze < 5 A für 100 ms → ausreichend; end
 * [Q5] Finder 38.51.7.024.0050: [buerklin.com](https://buerklin.com/en/p/finder/coupling-relays/38-51-7-024-0050/34G1383), Spulenstrom: [rs-online.com](https://uk.rs-online.com/web/p/interface-relay-modules/3864419), Datenblatt Serie 38: [findernet.com (PDF)](https://cdn.findernet.com/app/uploads/S38DE.pdf)
 * [Q6] MEAN WELL HDR‑15‑24 (24 V, 0,63 A, 17,5 mm): [digikey](https://www.digikey.co.uk/en/products/detail/mean-well-usa-inc/HDR-15-24/7703794), [bravoelectro.com](https://www.bravoelectro.com/hdr-15-24.html)
 * [Q7] ESP‑NOW und WLAN‑Kanal: [forum.micropython.org](https://forum.micropython.org/viewtopic.php?p=60474), [randomnerdtutorials.com](https://randomnerdtutorials.com/micropython-esp-now-esp32/)
+* [Q8] Espressif ESP32‑S3 Hardware Design Guidelines (Strapping‑Pins, Octal‑PSRAM): [espressif.com (PDF)](https://www.espressif.com/sites/default/files/documentation/esp32-s3_hardware_design_guidelines_en.pdf); RIOT‑OS ESP32‑S3‑Doku: [doc.riot-os.org](https://doc.riot-os.org/group__cpu__esp32__esp32s3.html)
+* [Q9] YD‑ESP32‑S3 Board‑Doku (PCB‑Antenne, GPIO48 = WS2812, GPIO35–37 belegt, 5V‑Pin): [github.com/vcc-gnd/YD-ESP32-S3](https://github.com/vcc-gnd/YD-ESP32-S3); Schaltplan: [mischianti.org (PDF)](https://mischianti.org/wp-content/uploads/2023/08/YD-ESP32-S3-SCH-V1.4.pdf)
+* [Q10] MicroPython Download ESP32_GENERIC_S3 (Variante SPIRAM_OCT): [micropython.org](https://www.micropython.org/download/ESP32_GENERIC_S3)
+* [Q11] Antennenumschaltung per 0‑Ω‑Widerstand (allgemein, ESP32‑S): [esp32.com Forum](https://esp32.com/viewtopic.php?p=45323)
 * SHT40‑Befehle/Umrechnungsformeln (`sht40.py`): Sensirion SHT4x‑Datenblatt (über [sensirion.com](https://sensirion.com/products/catalog/SHT40)).

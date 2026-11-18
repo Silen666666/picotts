@@ -12,12 +12,23 @@ NTP_SERVER = "pool.ntp.org"
 # selbstständig (siehe raumsensor/main.py).
 ESPNOW_KANAL = 6
 
+# --- Board-Auswahl -------------------------------------------------------------
+# "ESP32"    = ESP32-DevKitC-32U (ESP32-WROOM-32U)
+# "ESP32-S3" = ESP32-S3-DevKitC-kompatibel, z.B. YD-ESP32-S3 N16R8 mit IPEX-Antenne
+BOARD = "ESP32"
+
 # --- Ausgänge (GPIO -> ULN2803 -> Koppelrelais K1..K8, K9 = Wärmeanforderung)
-# Nur GPIOs, die keine Strapping-Pins sind (nicht 0, 2, 5, 12, 15) und die beim
-# Booten LOW bleiben.
-RELAIS_GPIO = [16, 17, 18, 19, 21, 22, 23, 25]   # K1..K8
-ANFORDERUNG_GPIO = 26                             # K9 (optional, potentialfrei)
-STATUS_LED_GPIO = 27                              # LED an der Frontplatte (optional)
+if BOARD == "ESP32-S3":
+    # Gemieden: Strapping-Pins 0, 3, 45, 46 · USB 19/20 · Flash 26..32 ·
+    # Octal-PSRAM 33..37 (N16R8) · UART0 43/44 (Konsole) · 48 (WS2812-RGB-LED)
+    RELAIS_GPIO = [4, 5, 6, 7, 15, 16, 17, 18]    # K1..K8 (alle auf einer Stiftleiste)
+    ANFORDERUNG_GPIO = 8                          # K9 (optional, potentialfrei)
+    STATUS_LED_GPIO = 9                           # externe LED mit 330 Ohm (optional)
+else:
+    # ESP32: Strapping-Pins 0, 2, 5, 12, 15 gemieden, Pins bleiben beim Booten LOW
+    RELAIS_GPIO = [16, 17, 18, 19, 21, 22, 23, 25]   # K1..K8
+    ANFORDERUNG_GPIO = 26                             # K9 (optional, potentialfrei)
+    STATUS_LED_GPIO = 27                              # LED an der Frontplatte (optional)
 
 # --- Regelparameter -----------------------------------------------------------
 PWM_PERIODE_S = 1200      # 20 min

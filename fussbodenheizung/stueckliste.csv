@@ -2,6 +2,7 @@ Pos;BMK;Menge;Einheit;Bezeichnung;Beispieltyp / Hersteller-Nr.;Funktion;Bemerkun
 1;-M1…M8;8;Stk;Thermischer Stellantrieb 230 V AC, stromlos geschlossen (NC);Möhlenhoff Alpha 5 230 V NC (z.B. A20405-00-883-01) oder Theben ALPHA 5 230 V (9070441);Öffnet/schließt je einen Heizkreis am Verteiler;Anzahl = Anzahl Heizkreise (Ventile) am Verteiler. Ventiladapter (z.B. VA80) passend zum Verteiler-Ventil wählen!
 2;—;8;Stk;Ventiladapter;passend zum Heizkreisverteiler (Hersteller des Verteilers fragen);Mechanische Aufnahme des Stellantriebs;Gewinde/Schließmaß des Verteilers vor Bestellung prüfen
 3;-A1;1;Stk;ESP32-Modul mit Anschluss für externe Antenne;Espressif ESP32-DevKitC-32U (ESP32-WROOM-32U);Zentrale: Funk-Empfang + Regelung;U.FL-Antennenanschluss, damit die Antenne außerhalb der UV liegen kann
+3a;-A1 (Alternative);1;Stk;ESP32-S3-Board N16R8 mit IPEX-Anschluss + Schraubklemmen-Adapter + Antenne;z.B. YD-ESP32-S3 N16R8 (VCC-GND-kompatibel) inkl. Terminal-Adapter 44P;Zentrale (statt Pos. 3);config.py: BOARD = "ESP32-S3"; MicroPython-Variante SPIRAM_OCT; Antennenumschaltung (0-Ω-Brücke) prüfen; Plan docs/stromlaufplan_esp32s3.svg
 4;—;1;Stk;2,4-GHz-Antenne mit Kabel U.FL→SMA;z.B. 2,4-GHz-Stabantenne 2–3 dBi + Pigtail U.FL/SMA 20 cm;Funkreichweite aus der UV heraus;Bei Metall-UV zwingend
 5;-A2, -A3;2;Stk;Darlington-Treiber 8-fach;ULN2803A (DIP-18) + IC-Sockel;Schaltet die 24-V-Relaisspulen;A3 nur für K9; 7 Kanäle Reserve
 6;-U1;1;Stk;DC/DC-Schaltregler 24 V → 5 V, 1 A;TRACO POWER TSR 1-2450;5-V-Versorgung ESP32 aus 24 V;Datenblatt Eingangsbereich prüfen

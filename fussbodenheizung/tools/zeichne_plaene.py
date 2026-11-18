@@ -2,6 +2,7 @@
 """
 Erzeugt die Pläne als SVG (nur Python-Standardbibliothek):
   docs/stromlaufplan.svg     Stromlaufplan Unterverteilung (aufgelöste Darstellung)
+  docs/stromlaufplan_esp32s3.svg  dto. mit ESP32-S3 als Zentrale
   docs/systemuebersicht.svg  Blockschaltbild des Gesamtsystems
   docs/hutschiene.svg        Belegungsplan der Hutschienen (Teilungseinheiten)
 
@@ -12,6 +13,7 @@ DIN EN 81346-2 (Q = Schalten Energie, K = Relais, T = Netzteil, A = Baugruppe,
 X = Klemme, M = Antrieb).
 
 Aufruf:  python3 tools/zeichne_plaene.py [Anzahl_Heizkanäle]   (Standard 8)
+Erzeugt den Stromlaufplan für beide Zentralen-Varianten (ESP32 und ESP32-S3).
 """
 import os
 import sys
@@ -19,8 +21,12 @@ import sys
 HIER = os.path.dirname(os.path.abspath(__file__))
 DOCS = os.path.join(HIER, "..", "docs")
 
-GPIO = [16, 17, 18, 19, 21, 22, 23, 25]
-GPIO_ANF = 26
+BOARDS = {
+    "esp32": {"gpio": [16, 17, 18, 19, 21, 22, 23, 25], "anf": 26, "datei": "stromlaufplan.svg",
+              "name": "-A1  ESP32-DevKitC-32U (ESP32-WROOM-32U, externe 2,4-GHz-Antenne)"},
+    "esp32s3": {"gpio": [4, 5, 6, 7, 15, 16, 17, 18], "anf": 8, "datei": "stromlaufplan_esp32s3.svg",
+                "name": "-A1  ESP32-S3 N16R8 (z.B. YD-ESP32-S3, IPEX-Antenne), auf Klemmadapter"},
+}
 
 
 class SVG:
@@ -114,7 +120,9 @@ def ls_schalter(s, x, y1, y2, name, daten):
 
 
 # --------------------------------------------------------------- Stromlaufplan
-def stromlaufplan(n=8):
+def stromlaufplan(n=8, board="esp32"):
+    B = BOARDS[board]
+    GPIO, GPIO_ANF = B["gpio"], B["anf"]
     dx = 110
     x0 = 720
     xs = [x0 + i * dx for i in range(n)]
@@ -245,8 +253,7 @@ def stromlaufplan(n=8):
         g = GPIO[i] if i < len(GPIO) else GPIO_ANF
         s.text(x + 4, y_esp - 6, "GPIO%d" % g, 8)
     s.rechteck(xs[0] - 30, y_esp, x_anf + 30 - (xs[0] - 30), 60, fuell="#fff")
-    s.text(xs[0] - 22, y_esp + 26, "-A1  ESP32-DevKitC-32U (ESP32-WROOM-32U, externe 2,4-GHz-Antenne)", 11,
-           fett=True)
+    s.text(xs[0] - 22, y_esp + 26, B["name"], 11, fett=True)
     s.text(xs[0] - 22, y_esp + 44, "MicroPython · Pulldown 10 kΩ je Ausgang nach 0 V auf der Trägerplatine "
            "(Relais bleiben beim Booten AUS)", 9)
     s.linie((xs[0] + x_anf) / 2.0, y_esp + 60, (xs[0] + x_anf) / 2.0, y_0v)
@@ -280,7 +287,7 @@ def stromlaufplan(n=8):
               "- - -  Feldleitung außerhalb der UV"]
     for j, z in enumerate(zeilen):
         s.text(lx + (j // 5) * 420, ly + 20 + (j % 5) * 15, z, 10)
-    s.speichern("stromlaufplan.svg")
+    s.speichern(B["datei"])
 
 
 # --------------------------------------------------------------- Systemübersicht
@@ -379,6 +386,7 @@ def hutschiene():
 
 if __name__ == "__main__":
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 8
-    stromlaufplan(n)
+    stromlaufplan(n, "esp32")
+    stromlaufplan(n, "esp32s3")
     systemuebersicht()
     hutschiene()
