@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="892" height="470" viewBox="0 0 892 470" font-family="DejaVu Sans, Arial, sans-serif">
+<rect width="100%" height="100%" fill="#fff"/>
+<text x="20" y="30" font-size="16" text-anchor="start" fill="#000" font-weight="bold">Hutschienenbelegung (Vorschlag, 2 Reihen à 12 TE, 1 TE = 17,5 mm)</text>
+<rect x="30" y="120" width="692" height="18" fill="#ddd" stroke="#000" stroke-width="0.8"/>
+<text x="30" y="62" font-size="12" text-anchor="start" fill="#000" font-weight="bold">Reihe 1</text>
+<rect x="40" y="70" width="56" height="120" fill="#eef4ff" stroke="#000" stroke-width="1.6"/>
+<text x="68" y="100" font-size="11" text-anchor="middle" fill="#000" font-weight="bold">-Q1</text>
+<text x="71" y="148" font-size="9" text-anchor="middle" fill="#000" transform="rotate(-90 71 148)">LS B6</text>
+<text x="68" y="210" font-size="9" text-anchor="middle" fill="#000">17.5 mm</text>
+<rect x="96" y="70" width="56" height="120" fill="#eef4ff" stroke="#000" stroke-width="1.6"/>
+<text x="124" y="100" font-size="11" text-anchor="middle" fill="#000" font-weight="bold">-T1</text>
+<text x="127" y="148" font-size="9" text-anchor="middle" fill="#000" transform="rotate(-90 127 148)">HDR-15-24</text>
+<text x="124" y="210" font-size="9" text-anchor="middle" fill="#000">17.5 mm</text>
+<rect x="152" y="70" width="336" height="120" fill="#eef4ff" stroke="#000" stroke-width="1.6"/>
+<text x="320" y="100" font-size="11" text-anchor="middle" fill="#000" font-weight="bold">-A1/A2/A3/U1</text>
+<text x="320" y="118" font-size="9" text-anchor="middle" fill="#000">Gehäuse 6 TE</text>
+<text x="320" y="132" font-size="9" text-anchor="middle" fill="#000">Trägerplatine:</text>
+<text x="320" y="146" font-size="9" text-anchor="middle" fill="#000">ESP32, ULN2803A,</text>
+<text x="320" y="160" font-size="9" text-anchor="middle" fill="#000">DC/DC, Pulldowns</text>
+<text x="320" y="210" font-size="9" text-anchor="middle" fill="#000">105.0 mm</text>
+<rect x="488" y="70" width="224" height="120" fill="#fff" stroke="#000" stroke-width="1.6" stroke-dasharray="4 3"/>
+<text x="600" y="100" font-size="11" text-anchor="middle" fill="#000">frei</text>
+<text x="600" y="120" font-size="9" text-anchor="middle" fill="#000"></text>
+<text x="600" y="210" font-size="9" text-anchor="middle" fill="#000">70.0 mm</text>
+<rect x="30" y="310" width="692" height="18" fill="#ddd" stroke="#000" stroke-width="0.8"/>
+<text x="30" y="252" font-size="12" text-anchor="start" fill="#000" font-weight="bold">Reihe 2</text>
+<rect x="40" y="260" width="178.56" height="120" fill="#eef4ff" stroke="#000" stroke-width="1.6"/>
+<text x="129.28" y="290" font-size="11" text-anchor="middle" fill="#000" font-weight="bold">-K1…K9</text>
+<text x="129.28" y="310" font-size="9" text-anchor="middle" fill="#000">9 × 6,2 mm</text>
+<text x="129.28" y="400" font-size="9" text-anchor="middle" fill="#000">55.8 mm</text>
+<rect x="218.56" y="260" width="282.88" height="120" fill="#eef4ff" stroke="#000" stroke-width="1.6"/>
+<text x="360" y="290" font-size="11" text-anchor="middle" fill="#000" font-weight="bold">-X2</text>
+<text x="360" y="310" font-size="9" text-anchor="middle" fill="#000">8×L 8×N 1×PE</text>
+<text x="360" y="400" font-size="9" text-anchor="middle" fill="#000">88.4 mm</text>
+<rect x="501.44" y="260" width="33.28" height="120" fill="#eef4ff" stroke="#000" stroke-width="1.6"/>
+<text x="518.08" y="290" font-size="11" text-anchor="middle" fill="#000" font-weight="bold">-X3</text>
+<text x="521.08" y="338" font-size="9" text-anchor="middle" fill="#000" transform="rotate(-90 521.08 338)">2 Kl.</text>
+<text x="518.08" y="400" font-size="9" text-anchor="middle" fill="#000">10.4 mm</text>
+<rect x="534.72" y="260" width="49.92" height="120" fill="#eef4ff" stroke="#000" stroke-width="1.6"/>
+<text x="559.68" y="290" font-size="11" text-anchor="middle" fill="#000" font-weight="bold">Endw.</text>
+<text x="562.68" y="338" font-size="9" text-anchor="middle" fill="#000" transform="rotate(-90 562.68 338)"></text>
+<text x="559.68" y="400" font-size="9" text-anchor="middle" fill="#000">15.6 mm</text>
+<text x="40" y="450" font-size="11" text-anchor="start" fill="#000">Antennenkabel (U.FL → SMA) aus der UV führen, falls Gehäuse/Abdeckung aus Metall.</text>
+</svg>
