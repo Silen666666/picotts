@@ -1,0 +1,92 @@
+# =============================================================================
+# OPTIONAL: Bedieneinheit am Raumsensor – OLED 0,96" (SSD1306, I2C) + 2 Taster
+# Zusätzlich zu common/raumsensor.yaml einbinden. Variablen:
+#   zone         technischer Zonenname (wie in der Zentrale)
+#   taste_plus   GPIO Taster "+" (gegen GND)
+#   taste_minus  GPIO Taster "−" (gegen GND)
+#
+# Anzeige: Raumtemperatur, Sollwert, Ventilstellung.
+# Taster ändern den Sollwert in 0,5-K-Schritten über Home Assistant
+# (Aktion climate.set_temperature auf climate.fbh_zentrale_<zone>).
+# WICHTIG: In HA unter Einstellungen > Geräte > ESPHome > Gerät > "Konfigurieren"
+# die Option "Dem Gerät erlauben, Home-Assistant-Aktionen auszuführen" aktivieren.
+# Ohne laufendes HA zeigt das Display weiter die Temperatur, Taster wirken dann nicht;
+# die Heizung regelt trotzdem mit dem zuletzt gespeicherten Sollwert weiter.
+# =============================================================================
+
+sensor:
+  # Sollwert und Ventilstellung aus Home Assistant (stammen von der Zentrale)
+  - platform: homeassistant
+    id: soll_ha
+    entity_id: climate.fbh_zentrale_${zone}
+    attribute: temperature
+  - platform: homeassistant
+    id: stellgrad_ha
+    entity_id: sensor.fbh_zentrale_stellgrad_${zone}
+
+binary_sensor:
+  - platform: gpio
+    id: taste_plus
+    pin:
+      number: ${taste_plus}
+      mode: INPUT_PULLUP
+      inverted: true
+    filters:
+      - delayed_on: 30ms
+    on_press:
+      - homeassistant.action:
+          action: climate.set_temperature
+          data:
+            entity_id: climate.fbh_zentrale_${zone}
+          data_template:
+            temperature: "{{ soll }}"
+          variables:
+            soll: !lambda |-
+              float s = std::isnan(id(soll_ha).state) ? 20.0f : id(soll_ha).state;
+              return std::min(28.0f, s + 0.5f);
+  - platform: gpio
+    id: taste_minus
+    pin:
+      number: ${taste_minus}
+      mode: INPUT_PULLUP
+      inverted: true
+    filters:
+      - delayed_on: 30ms
+    on_press:
+      - homeassistant.action:
+          action: climate.set_temperature
+          data:
+            entity_id: climate.fbh_zentrale_${zone}
+          data_template:
+            temperature: "{{ soll }}"
+          variables:
+            soll: !lambda |-
+              float s = std::isnan(id(soll_ha).state) ? 20.0f : id(soll_ha).state;
+              return std::max(5.0f, s - 0.5f);
+
+font:
+  - file: "gfonts://Roboto"
+    id: schrift_gross
+    size: 30
+    glyphs: "0123456789.,-°C "
+  - file: "gfonts://Roboto"
+    id: schrift_klein
+    size: 12
+
+display:
+  - platform: ssd1306_i2c
+    model: "SSD1306 128x64"
+    address: 0x3C
+    update_interval: 5s
+    lambda: |-
+      it.print(0, 0, id(schrift_klein), "${friendly_name}");
+      if (std::isnan(id(temperatur).state))
+        it.print(0, 14, id(schrift_gross), "--.- °C");
+      else
+        it.printf(0, 14, id(schrift_gross), "%.1f °C", id(temperatur).state);
+      if (std::isnan(id(soll_ha).state))
+        it.print(0, 50, id(schrift_klein), "Soll: keine Verbindung");
+      else
+        it.printf(0, 50, id(schrift_klein), "Soll %.1f°C  Ventil %.0f%%",
+                  id(soll_ha).state,
+                  std::isnan(id(stellgrad_ha).state) ? 0.0f : id(stellgrad_ha).state);

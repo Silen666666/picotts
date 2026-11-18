@@ -1,9 +1,9 @@
 Pos;BMK;Menge;Einheit;Bezeichnung;Beispieltyp / Hersteller-Nr.;Funktion;Bemerkung / Quelle
 1;-M1…M8;8;Stk;Thermischer Stellantrieb 230 V AC, stromlos geschlossen (NC);Möhlenhoff Alpha 5 230 V NC (z.B. A20405-00-883-01) oder Theben ALPHA 5 230 V (9070441);Öffnet/schließt je einen Heizkreis am Verteiler;Anzahl = Anzahl Heizkreise (Ventile) am Verteiler. Ventiladapter (z.B. VA80) passend zum Verteiler-Ventil wählen!
 2;—;8;Stk;Ventiladapter;passend zum Heizkreisverteiler (Hersteller des Verteilers fragen);Mechanische Aufnahme des Stellantriebs;Gewinde/Schließmaß des Verteilers vor Bestellung prüfen
-3;-A1;1;Stk;ESP32-Modul mit Anschluss für externe Antenne;Espressif ESP32-DevKitC-32U (ESP32-WROOM-32U);Zentrale: Funk-Empfang + Regelung;U.FL-Antennenanschluss, damit die Antenne außerhalb der UV liegen kann
-3a;-A1 (Alternative);1;Stk;ESP32-S3-Board N16R8 mit IPEX-Anschluss + Schraubklemmen-Adapter + Antenne;z.B. YD-ESP32-S3 N16R8 (VCC-GND-kompatibel) inkl. Terminal-Adapter 44P;Zentrale (statt Pos. 3);config.py: BOARD = "ESP32-S3"; MicroPython-Variante SPIRAM_OCT; Antennenumschaltung (0-Ω-Brücke) prüfen; Plan docs/stromlaufplan_esp32s3.svg
-4;—;1;Stk;2,4-GHz-Antenne mit Kabel U.FL→SMA;z.B. 2,4-GHz-Stabantenne 2–3 dBi + Pigtail U.FL/SMA 20 cm;Funkreichweite aus der UV heraus;Bei Metall-UV zwingend
+3;-A1;1;Stk;ESP32-S3-Board N16R8 mit IPEX-Anschluss + Schraubklemmen-Adapter + Antenne;z.B. YD-ESP32-S3 N16R8 (VCC-GND-kompatibel) inkl. Terminal-Adapter 44P;Zentrale: Regelung (ESPHome), WLAN zu Home Assistant;Antennenumschaltung PCB/IPEX (0-Ω-Brücke) prüfen; Plan docs/stromlaufplan_esp32s3.svg
+3a;-A1 (Alternative);1;Stk;ESP32-Modul mit U.FL-Antennenanschluss;Espressif ESP32-DevKitC-32U (ESP32-WROOM-32U);Zentrale (statt Pos. 3);in fbh-zentrale.yaml board: esp32dev, GPIOs laut Kommentar; Plan docs/stromlaufplan.svg
+4;—;1;Stk;2,4-GHz-Antenne mit Kabel U.FL→SMA;z.B. 2,4-GHz-Stabantenne 2–3 dBi + Pigtail U.FL/SMA 20 cm;WLAN-Empfang aus der UV heraus;Bei Metall-UV zwingend
 5;-A2, -A3;2;Stk;Darlington-Treiber 8-fach;ULN2803A (DIP-18) + IC-Sockel;Schaltet die 24-V-Relaisspulen;A3 nur für K9; 7 Kanäle Reserve
 6;-U1;1;Stk;DC/DC-Schaltregler 24 V → 5 V, 1 A;TRACO POWER TSR 1-2450;5-V-Versorgung ESP32 aus 24 V;Datenblatt Eingangsbereich prüfen
 7;—;9;Stk;Widerstand 10 kΩ, 0,25 W;Metallschicht;Pulldown je GPIO-Ausgang;Relais bleiben beim Booten aus
@@ -24,9 +24,13 @@ Pos;BMK;Menge;Einheit;Bezeichnung;Beispieltyp / Hersteller-Nr.;Funktion;Bemerkun
 22;—;20;Stk;Verbindungsklemmen;WAGO 221-412 / 221-413;Klemmung im Abzweigkasten;
 23;—;nach Bedarf;m;Verdrahtungsleitung H05V-K 0,75 mm² (24 V) und H07V-K 1,5 mm² (230 V);—;Interne Verdrahtung UV;24-V-Leitungen ebenfalls mit 300/500-V-Isolierung, getrennt von 230 V führen
 24;—;nach Bedarf;Stk;Aderendhülsen isoliert 0,75 / 1,5 mm²;—;;
-25;—;6;Stk;Mikrocontroller-Board ESP32-C3;Espressif ESP32-C3-DevKitM-1 (oder ESP32-C3 SuperMini);Raumsensor (Funk);Anzahl = Anzahl Räume/Zonen
+25;—;6;Stk;Mikrocontroller-Board ESP32-C3;Espressif ESP32-C3-DevKitM-1 (oder ESP32-C3 SuperMini);Raumsensor (ESPHome, WLAN);Anzahl = Anzahl Räume/Zonen
 26;—;6;Stk;Temperatur-/Feuchtesensor SHT40 (Breakout);z.B. Adafruit 4885 (SHT40, STEMMA QT);Raumtemperaturmessung, typ. ±0,2 °C;
 27;—;6;Stk;Sensorgehäuse mit Lüftungsschlitzen;z.B. Aufputz-Sensorgehäuse 80×80 mm oder 3D-Druck;Montage im Raum;Fühler thermisch vom ESP32 getrennt (Abstand ≥ 5 cm, Trennsteg)
-28;—;6;Stk;USB-Netzteil 5 V, ≥ 1 A, mit Kabel;Markengerät mit CE;Versorgung Raumsensor;Alternative: Batterie (Deep-Sleep), siehe README
+28;—;6;Stk;USB-Netzteil 5 V, ≥ 1 A, mit Kabel;Markengerät mit CE;Versorgung Raumsensor (Dauerbetrieb WLAN);Batteriebetrieb in diesem Konzept nicht vorgesehen
 29;—;6;Stk;Verbindungskabel 4-adrig (I²C, 5–10 cm);z.B. STEMMA-QT/Qwiic-Kabel;SHT40 ↔ ESP32-C3;
-30;—;1;Stk;Referenzthermometer;geeichtes/kalibriertes Raumthermometer;Abgleich OFFSET_K der Sensoren;
+30;—;1;Stk;Referenzthermometer;geeichtes/kalibriertes Raumthermometer;Abgleich "offset" der Raumsensoren;
+31;—;0–6;Stk;OLED-Display 0,96" 128×64, I²C, SSD1306 (optional);z.B. SSD1306-Modul 0,96" I²C 3,3 V, Adresse 0x3C;Anzeige Ist/Soll/Ventil am Raumsensor;nur für Räume mit Bedienung (Beispiel: Wohnen)
+32;—;0–12;Stk;Kurzhubtaster 6×6 mm (optional);—;Sollwert +/− 0,5 K am Raumsensor;2 je Raum mit Display, gegen GND an GPIO6/GPIO7
+33;—;0–n;Stk;Touch-Wandpanel (optional);z.B. Guition ESP32-S3-4848S040 (4", 480×480, ESPHome/LVGL) oder Tablet mit HA-Dashboard;Zentrale Bedienung aller Räume;ESPHome-Konfiguration nicht Teil dieses Projekts (siehe README)
+34;—;1;—;Home Assistant mit ESPHome-Add-on (vorhanden);—;Bedienung, Zeitpläne, Installation/Updates der ESP-Geräte;homeassistant/packages/fussbodenheizung.yaml einbinden

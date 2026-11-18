@@ -360,7 +360,7 @@
 <text x="1604" y="894" font-size="8" text-anchor="start" fill="#000">GPIO8</text>
 <rect x="690" y="900" width="940" height="60" fill="#fff" stroke="#000" stroke-width="1.6"/>
 <text x="698" y="926" font-size="11" text-anchor="start" fill="#000" font-weight="bold">-A1  ESP32-S3 N16R8 (z.B. YD-ESP32-S3, IPEX-Antenne), auf Klemmadapter</text>
-<text x="698" y="944" font-size="9" text-anchor="start" fill="#000">MicroPython · Pulldown 10 kΩ je Ausgang nach 0 V auf der Trägerplatine (Relais bleiben beim Booten AUS)</text>
+<text x="698" y="944" font-size="9" text-anchor="start" fill="#000">ESPHome · Pulldown 10 kΩ je Ausgang nach 0 V auf der Trägerplatine (Relais bleiben beim Booten AUS)</text>
 <line x1="1160" y1="960" x2="1160" y2="1030" stroke="#000" stroke-width="1.6"/>
 <circle cx="1160" cy="1030" r="3.2" fill="#000" stroke="#000" stroke-width="0"/>
 <text x="1164" y="974" font-size="8" text-anchor="start" fill="#000">GND</text>

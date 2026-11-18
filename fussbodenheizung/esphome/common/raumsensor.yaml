@@ -1,0 +1,74 @@
+# =============================================================================
+# Raumsensor ESP32-C3 + Sensirion SHT40 – gemeinsame Basis für alle Räume.
+# Variablen (in fbh-sensor-<raum>.yaml unter substitutions):
+#   name, friendly_name, offset (Kalibrierung in K), sda, scl
+#
+# Sendet die Temperatur
+#   a) an Home Assistant (Anzeige, Verlauf) über die ESPHome-API und
+#   b) direkt an die Zentrale per UDP (packet_transport, verschlüsselt),
+#      damit die Regelung auch bei ausgefallenem Home Assistant weiterläuft.
+# =============================================================================
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32-c3-devkitm-1
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_key_sensoren
+
+ota:
+  - platform: esphome
+    encryption:   # nutzt denselben Schlüssel wie die API
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_passwort
+  # Geringere Sendeleistung = weniger Eigenerwärmung (bei schlechtem Empfang erhöhen)
+  output_power: 11dB
+  ap:
+    ssid: "${name} Fallback"
+    password: !secret fallback_passwort
+
+captive_portal:
+
+i2c:
+  sda: ${sda}
+  scl: ${scl}
+  frequency: 100kHz
+
+sensor:
+  - platform: sht4x
+    update_interval: 60s
+    precision: High
+    temperature:
+      id: temperatur
+      name: "Temperatur"
+      accuracy_decimals: 1
+      filters:
+        - offset: ${offset}
+    humidity:
+      id: feuchte
+      name: "Luftfeuchte"
+      accuracy_decimals: 0
+
+  - platform: wifi_signal
+    name: "WLAN-Signal"
+    update_interval: 300s
+
+udp:
+
+packet_transport:
+  - platform: udp
+    update_interval: 60s
+    encryption: !secret transport_key
+    sensors:
+      - temperatur
+      - feuchte

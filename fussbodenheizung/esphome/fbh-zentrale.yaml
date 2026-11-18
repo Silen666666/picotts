@@ -1,0 +1,149 @@
+# =============================================================================
+# Zentrale der Fußbodenheizungsregelung (Unterverteilung) – ESPHome
+# Board: ESP32-S3 N16R8 (z.B. YD-ESP32-S3 mit IPEX-Antenne)
+#
+# Alternative ESP32-DevKitC-32U: unter esp32 "board: esp32dev" und
+# "flash_size: 4MB" setzen, GPIOs: K1..K8 = 16,17,18,19,21,22,23,25,
+# K9 = GPIO26, Status-LED = GPIO27.
+# =============================================================================
+substitutions:
+  name: fbh-zentrale
+  friendly_name: FBH Zentrale
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  comment: Fußbodenheizung – Relais in der Unterverteilung
+
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_key_zentrale
+
+ota:
+  - platform: esphome
+    encryption:   # nutzt denselben Schlüssel wie die API
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_passwort
+  # Energiesparen aus: zuverlässiger Empfang der UDP-Pakete der Raumsensoren
+  power_save_mode: none
+  ap:
+    ssid: "FBH-Zentrale Fallback"
+    password: !secret fallback_passwort
+
+captive_portal:
+
+# Blinkt bei Fehlern (z.B. kein WLAN) – externe LED mit 330 Ohm an GPIO9
+status_led:
+  pin: GPIO9
+
+# Uhrzeit nur für den wöchentlichen Ventilschutz; die Regelung selbst braucht
+# keine Uhrzeit. Zeitpläne/Absenkung macht Home Assistant (siehe homeassistant/).
+time:
+  - platform: sntp
+    id: zeit
+    timezone: Europe/Berlin
+    on_time:
+      # Ventilschutz: jeden Montag 11:00 alle Ventile 10 min öffnen
+      - seconds: 0
+        minutes: 0
+        hours: 11
+        days_of_week: MON
+        then:
+          - globals.set:
+              id: ventilschutz_aktiv
+              value: "true"
+          - delay: 10min
+          - globals.set:
+              id: ventilschutz_aktiv
+              value: "false"
+
+globals:
+  - id: ventilschutz_aktiv
+    type: bool
+    restore_value: false
+    initial_value: "false"
+  - id: anforderung_maske
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+
+# --- Empfang der Raumtemperaturen per UDP (verschlüsselt) -------------------
+udp:
+
+packet_transport:
+  - platform: udp
+    providers:
+      - name: fbh-sensor-wohnen
+        encryption: !secret transport_key
+      - name: fbh-sensor-kueche
+        encryption: !secret transport_key
+      - name: fbh-sensor-bad
+        encryption: !secret transport_key
+      - name: fbh-sensor-schlafen
+        encryption: !secret transport_key
+      - name: fbh-sensor-kind
+        encryption: !secret transport_key
+      - name: fbh-sensor-buero
+        encryption: !secret transport_key
+
+# --- Heizzonen (K1..K8). Freie Kanäle: GPIO17 (K7), GPIO18 (K8) --------------
+packages:
+  wohnen: !include
+    file: common/zone.yaml
+    vars: { zone: wohnen, name: Wohnen, gpio: GPIO4, bit: 0, soll: 21.0 }
+  kueche: !include
+    file: common/zone.yaml
+    vars: { zone: kueche, name: Küche, gpio: GPIO5, bit: 1, soll: 20.5 }
+  bad: !include
+    file: common/zone.yaml
+    vars: { zone: bad, name: Bad, gpio: GPIO6, bit: 2, soll: 23.0 }
+  schlafen: !include
+    file: common/zone.yaml
+    vars: { zone: schlafen, name: Schlafen, gpio: GPIO7, bit: 3, soll: 18.0 }
+  kind: !include
+    file: common/zone.yaml
+    vars: { zone: kind, name: Kind, gpio: GPIO15, bit: 4, soll: 20.0 }
+  buero: !include
+    file: common/zone.yaml
+    vars: { zone: buero, name: Büro, gpio: GPIO16, bit: 5, soll: 20.5 }
+
+# --- K9: potentialfreie Wärmeanforderung (Pumpe/Wärmeerzeuger) --------------
+output:
+  - platform: gpio
+    id: k9_anforderung
+    pin: GPIO8
+
+binary_sensor:
+  - platform: template
+    id: waermeanforderung
+    name: "Wärmeanforderung"
+    device_class: heat
+
+interval:
+  - interval: 30s
+    then:
+      - lambda: |-
+          bool an = id(anforderung_maske) != 0;
+          if (an) id(k9_anforderung).turn_on(); else id(k9_anforderung).turn_off();
+          id(waermeanforderung).publish_state(an);
+
+sensor:
+  - platform: wifi_signal
+    name: "WLAN-Signal"
+    update_interval: 120s
+  - platform: uptime
+    name: "Laufzeit"
+
+button:
+  - platform: restart
+    name: "Neustart"

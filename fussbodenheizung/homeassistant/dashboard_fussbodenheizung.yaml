@@ -1,0 +1,140 @@
+# Dashboard (erzeugt mit tools/erzeuge_homeassistant.py)
+# HA: Einstellungen > Dashboards > Dashboard hinzufügen > (neu) > ⋮ > Raw-Konfigurationseditor
+#     -> Inhalt einfügen.
+
+title: Fußbodenheizung
+views:
+- title: Heizung
+  path: heizung
+  icon: "mdi:radiator"
+  cards:
+  - type: entities
+    title: Fußbodenheizung
+    entities:
+    - input_boolean.fbh_zeitprogramm
+    - input_boolean.fbh_abwesend
+    - binary_sensor.fbh_zentrale_warmeanforderung
+  - type: vertical-stack
+    cards:
+    - type: thermostat
+      entity: climate.fbh_zentrale_wohnen
+      name: Wohnen
+    - type: entities
+      entities:
+      - entity: sensor.fbh_zentrale_stellgrad_wohnen
+        name: Ventil (Stellgrad)
+      - entity: sensor.fbh_zentrale_status_wohnen
+        name: Status
+      - entity: sensor.fbh_sensor_wohnen_luftfeuchte
+        name: Luftfeuchte
+      - entity: input_number.fbh_wohnen_komfort
+        name: Komfort
+      - entity: input_number.fbh_wohnen_absenk
+        name: Absenkung
+      - entity: schedule.fbh_wohnen
+        name: Komfortzeit aktiv
+  - type: vertical-stack
+    cards:
+    - type: thermostat
+      entity: climate.fbh_zentrale_kueche
+      name: Küche
+    - type: entities
+      entities:
+      - entity: sensor.fbh_zentrale_stellgrad_kueche
+        name: Ventil (Stellgrad)
+      - entity: sensor.fbh_zentrale_status_kueche
+        name: Status
+      - entity: sensor.fbh_sensor_kueche_luftfeuchte
+        name: Luftfeuchte
+      - entity: input_number.fbh_kueche_komfort
+        name: Komfort
+      - entity: input_number.fbh_kueche_absenk
+        name: Absenkung
+      - entity: schedule.fbh_kueche
+        name: Komfortzeit aktiv
+  - type: vertical-stack
+    cards:
+    - type: thermostat
+      entity: climate.fbh_zentrale_bad
+      name: Bad
+    - type: entities
+      entities:
+      - entity: sensor.fbh_zentrale_stellgrad_bad
+        name: Ventil (Stellgrad)
+      - entity: sensor.fbh_zentrale_status_bad
+        name: Status
+      - entity: sensor.fbh_sensor_bad_luftfeuchte
+        name: Luftfeuchte
+      - entity: input_number.fbh_bad_komfort
+        name: Komfort
+      - entity: input_number.fbh_bad_absenk
+        name: Absenkung
+      - entity: schedule.fbh_bad
+        name: Komfortzeit aktiv
+  - type: vertical-stack
+    cards:
+    - type: thermostat
+      entity: climate.fbh_zentrale_schlafen
+      name: Schlafen
+    - type: entities
+      entities:
+      - entity: sensor.fbh_zentrale_stellgrad_schlafen
+        name: Ventil (Stellgrad)
+      - entity: sensor.fbh_zentrale_status_schlafen
+        name: Status
+      - entity: sensor.fbh_sensor_schlafen_luftfeuchte
+        name: Luftfeuchte
+      - entity: input_number.fbh_schlafen_komfort
+        name: Komfort
+      - entity: input_number.fbh_schlafen_absenk
+        name: Absenkung
+      - entity: schedule.fbh_schlafen
+        name: Komfortzeit aktiv
+  - type: vertical-stack
+    cards:
+    - type: thermostat
+      entity: climate.fbh_zentrale_kind
+      name: Kind
+    - type: entities
+      entities:
+      - entity: sensor.fbh_zentrale_stellgrad_kind
+        name: Ventil (Stellgrad)
+      - entity: sensor.fbh_zentrale_status_kind
+        name: Status
+      - entity: sensor.fbh_sensor_kind_luftfeuchte
+        name: Luftfeuchte
+      - entity: input_number.fbh_kind_komfort
+        name: Komfort
+      - entity: input_number.fbh_kind_absenk
+        name: Absenkung
+      - entity: schedule.fbh_kind
+        name: Komfortzeit aktiv
+  - type: vertical-stack
+    cards:
+    - type: thermostat
+      entity: climate.fbh_zentrale_buero
+      name: Büro
+    - type: entities
+      entities:
+      - entity: sensor.fbh_zentrale_stellgrad_buero
+        name: Ventil (Stellgrad)
+      - entity: sensor.fbh_zentrale_status_buero
+        name: Status
+      - entity: sensor.fbh_sensor_buero_luftfeuchte
+        name: Luftfeuchte
+      - entity: input_number.fbh_buero_komfort
+        name: Komfort
+      - entity: input_number.fbh_buero_absenk
+        name: Absenkung
+      - entity: schedule.fbh_buero
+        name: Komfortzeit aktiv
+  - type: history-graph
+    title: Raumtemperaturen (24 h)
+    hours_to_show: 24
+    entities:
+    - climate.fbh_zentrale_wohnen
+    - climate.fbh_zentrale_kueche
+    - climate.fbh_zentrale_bad
+    - climate.fbh_zentrale_schlafen
+    - climate.fbh_zentrale_kind
+    - climate.fbh_zentrale_buero

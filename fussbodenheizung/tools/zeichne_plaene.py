@@ -254,7 +254,7 @@ def stromlaufplan(n=8, board="esp32"):
         s.text(x + 4, y_esp - 6, "GPIO%d" % g, 8)
     s.rechteck(xs[0] - 30, y_esp, x_anf + 30 - (xs[0] - 30), 60, fuell="#fff")
     s.text(xs[0] - 22, y_esp + 26, B["name"], 11, fett=True)
-    s.text(xs[0] - 22, y_esp + 44, "MicroPython · Pulldown 10 kΩ je Ausgang nach 0 V auf der Trägerplatine "
+    s.text(xs[0] - 22, y_esp + 44, "ESPHome · Pulldown 10 kΩ je Ausgang nach 0 V auf der Trägerplatine "
            "(Relais bleiben beim Booten AUS)", 9)
     s.linie((xs[0] + x_anf) / 2.0, y_esp + 60, (xs[0] + x_anf) / 2.0, y_0v)
     s.punkt((xs[0] + x_anf) / 2.0, y_0v)
@@ -292,55 +292,76 @@ def stromlaufplan(n=8, board="esp32"):
 
 # --------------------------------------------------------------- Systemübersicht
 def systemuebersicht():
-    s = SVG(1200, 640)
-    s.text(20, 30, "Systemübersicht Fußbodenheizungsregelung", 18, fett=True)
+    s = SVG(1200, 720)
+    s.text(20, 30, "Systemübersicht Fußbodenheizungsregelung – Home Assistant + ESPHome", 18, fett=True)
 
     raeume = ["Wohnen", "Küche", "Bad", "Schlafen", "Kind", "Büro"]
     for i, r in enumerate(raeume):
         x = 30 + i * 190
-        s.rechteck(x, 60, 160, 90, fuell="#f4f8ff")
-        s.text(x + 80, 82, "Raumsensor " + r, 11, "middle", fett=True)
-        s.text(x + 80, 100, "ESP32-C3 + SHT40", 10, "middle")
-        s.text(x + 80, 116, "5-V-USB-Netzteil", 10, "middle")
-        s.text(x + 80, 132, "Montage 1,5 m, Innenwand", 9, "middle")
-        s.linie(x + 80, 150, 600, 250, w=1.2, strich="7 5", farbe="#1a5fb4")
-    s.text(30, 200, "ESP-NOW 2,4 GHz", 12, farbe="#1a5fb4", fett=True)
-    s.text(30, 216, "(Funk, ohne Router nutzbar)", 11, farbe="#1a5fb4")
+        s.rechteck(x, 55, 160, 95, fuell="#f4f8ff")
+        s.text(x + 80, 76, "Raumsensor " + r, 11, "middle", fett=True)
+        s.text(x + 80, 94, "ESP32-C3 + SHT40", 10, "middle")
+        s.text(x + 80, 109, "ESPHome · USB 5 V", 10, "middle")
+        s.text(x + 80, 124, "1,5 m, Innenwand", 9, "middle")
+        if i == 0:
+            s.text(x + 80, 140, "opt.: OLED + 2 Taster", 9, "middle", farbe="#1a5fb4")
+        s.linie(x + 80, 150, 600, 205, w=1.2, strich="7 5", farbe="#1a5fb4")
 
-    # WLAN-Router optional
-    s.rechteck(930, 200, 220, 60, strich="5 4", fuell="#fafafa")
-    s.text(1040, 225, "WLAN-Router (optional)", 11, "middle", fett=True)
-    s.text(1040, 243, "nur Uhrzeit (NTP) für Absenkung", 9, "middle")
-    s.linie(930, 230, 820, 300, w=1.2, strich="5 4", farbe="#666")
+    # WLAN-Router
+    s.rechteck(490, 205, 220, 46, fuell="#fafafa")
+    s.text(600, 233, "WLAN-Router (2,4 GHz)", 11, "middle", fett=True)
+
+    # Home Assistant
+    s.rechteck(860, 190, 310, 120, w=2, fuell="#eef8ff")
+    s.text(1015, 212, "Home Assistant (vorhanden)", 13, "middle", fett=True)
+    s.text(875, 234, "• ESPHome-Add-on (Installation, OTA)", 10)
+    s.text(875, 251, "• Dashboard: Thermostat je Raum", 10)
+    s.text(875, 268, "• Zeitpläne Komfort/Absenkung, Abwesend", 10)
+    s.text(875, 285, "• Meldungen (Fühlerausfall, Zentrale offline)", 10)
+    s.text(875, 302, "• Verlauf/Statistik", 10)
+    s.linie(710, 228, 860, 240, w=2, farbe="#666")
+
+    # Bedienung
+    s.rechteck(860, 340, 310, 70, fuell="#fafafa", strich="5 4")
+    s.text(1015, 362, "Sollwertvorgabe / Bedienung", 11, "middle", fett=True)
+    s.text(1015, 380, "HA-App (Handy), Browser, Wandtablet", 10, "middle")
+    s.text(1015, 396, "optional: Touchpanel (ESPHome/LVGL)", 10, "middle")
+    s.linie(1015, 310, 1015, 340, w=1.2, strich="5 4")
 
     # UV
-    s.rechteck(380, 250, 440, 230, w=2, fuell="#fffaf0")
-    s.text(390, 272, "Unterverteilung (UV)", 13, fett=True)
-    box = [("-Q1 LS B6", 400, 290), ("-T1 Netzteil 24 V", 520, 290), ("-U1 DC/DC 5 V", 660, 290),
-           ("-A1 ESP32 Zentrale", 400, 350), ("-A2/A3 ULN2803A", 560, 350),
-           ("-K1…K9 Koppelrelais", 400, 410), ("-X2/-X3 Reihenklemmen", 590, 410)]
+    s.rechteck(380, 300, 440, 230, w=2, fuell="#fffaf0")
+    s.text(390, 322, "Unterverteilung (UV)", 13, fett=True)
+    box = [("-Q1 LS B6", 400, 340), ("-T1 Netzteil 24 V", 520, 340), ("-U1 DC/DC 5 V", 660, 340),
+           ("-A1 ESP32-S3 (ESPHome)", 400, 400), ("-A2/A3 ULN2803A", 570, 400),
+           ("-K1…K9 Koppelrelais", 400, 460), ("-X2/-X3 Reihenklemmen", 590, 460)]
     for t, x, y in box:
-        b = 150 if "Koppel" in t or "Reihen" in t or "ESP32" in t else 120
+        b = 155 if "Koppel" in t or "Reihen" in t or "ESP32" in t else 120
         s.rechteck(x, y, b, 44, fuell="#fff")
         s.text(x + b / 2.0, y + 27, t, 10, "middle")
-    s.text(810, 470, "ext. Antenne", 9, "end")
+    s.text(810, 522, "ext. Antenne", 9, "end")
+    s.linie(600, 251, 600, 300, w=2, farbe="#666")
+    s.text(608, 266, "WLAN: API zu HA (Sollwerte, Status)", 9)
+    s.text(608, 279, "+ UDP direkt Sensor → Zentrale (verschlüsselt)", 9)
+    s.text(30, 580, "Regelung (PID + PWM) läuft LOKAL in der Zentrale:", 10, farbe="#a40000", fett=True)
+    s.text(30, 596, "bei Ausfall von Home Assistant regelt sie mit dem", 10, farbe="#a40000")
+    s.text(30, 612, "zuletzt gespeicherten Sollwert weiter.", 10, farbe="#a40000")
 
     # Heizkreisverteiler
-    s.rechteck(380, 540, 440, 80, fuell="#f3fff3")
-    s.text(390, 562, "Heizkreisverteiler (Fußbodenheizung)", 13, fett=True)
+    s.rechteck(380, 600, 440, 80, fuell="#f3fff3")
+    s.text(390, 622, "Heizkreisverteiler (Fußbodenheizung)", 13, fett=True)
     for i in range(8):
         x = 400 + i * 52
-        s.rechteck(x, 572, 40, 36, fuell="#fff")
-        s.text(x + 20, 595, "M%d" % (i + 1), 10, "middle")
-    s.linie(600, 480, 600, 540, w=2.5)
-    s.text(610, 510, "Feldleitung 230 V, z.B. 2 × NYM-J 7×1,5 mm²", 10)
+        s.rechteck(x, 632, 40, 36, fuell="#fff")
+        s.text(x + 20, 655, "M%d" % (i + 1), 10, "middle")
+    s.linie(600, 530, 600, 600, w=2.5)
+    s.text(610, 570, "Feldleitung 230 V, z.B. 2 × NYM-J 7×1,5 mm²", 10)
 
     # Wärmeerzeuger
-    s.rechteck(900, 400, 260, 70, fuell="#fafafa", strich="5 4")
-    s.text(1030, 425, "Wärmeerzeuger / Heizkreispumpe", 11, "middle", fett=True)
-    s.text(1030, 445, "Eingang Wärmeanforderung", 9, "middle")
-    s.text(1030, 458, "(optional, potentialfrei über K9)", 9, "middle")
-    s.linie(820, 435, 900, 435, w=1.2, strich="5 4")
+    s.rechteck(30, 450, 260, 70, fuell="#fafafa", strich="5 4")
+    s.text(160, 475, "Wärmeerzeuger / Heizkreispumpe", 11, "middle", fett=True)
+    s.text(160, 495, "Eingang Wärmeanforderung", 9, "middle")
+    s.text(160, 508, "(optional, potentialfrei über K9)", 9, "middle")
+    s.linie(290, 485, 380, 485, w=1.2, strich="5 4")
     s.speichern("systemuebersicht.svg")
 
 

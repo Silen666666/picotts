@@ -1,0 +1,370 @@
+# Fußbodenheizung – Home-Assistant-Paket (erzeugt mit tools/erzeuge_homeassistant.py)
+# Einbinden in configuration.yaml:
+#   homeassistant:
+#     packages: !include_dir_named packages
+# und diese Datei nach /config/packages/ kopieren.
+
+input_number:
+  fbh_wohnen_komfort:
+    name: Wohnen Komfort
+    min: 5
+    max: 28
+    step: 0.5
+    initial: 21.0
+    unit_of_measurement: °C
+    mode: box
+    icon: "mdi:sofa"
+  fbh_wohnen_absenk:
+    name: Wohnen Absenkung
+    min: 5
+    max: 28
+    step: 0.5
+    initial: 19.0
+    unit_of_measurement: °C
+    mode: box
+    icon: "mdi:weather-night"
+  fbh_kueche_komfort:
+    name: Küche Komfort
+    min: 5
+    max: 28
+    step: 0.5
+    initial: 20.5
+    unit_of_measurement: °C
+    mode: box
+    icon: "mdi:sofa"
+  fbh_kueche_absenk:
+    name: Küche Absenkung
+    min: 5
+    max: 28
+    step: 0.5
+    initial: 18.5
+    unit_of_measurement: °C
+    mode: box
+    icon: "mdi:weather-night"
+  fbh_bad_komfort:
+    name: Bad Komfort
+    min: 5
+    max: 28
+    step: 0.5
+    initial: 23.0
+    unit_of_measurement: °C
+    mode: box
+    icon: "mdi:sofa"
+  fbh_bad_absenk:
+    name: Bad Absenkung
+    min: 5
+    max: 28
+    step: 0.5
+    initial: 21.0
+    unit_of_measurement: °C
+    mode: box
+    icon: "mdi:weather-night"
+  fbh_schlafen_komfort:
+    name: Schlafen Komfort
+    min: 5
+    max: 28
+    step: 0.5
+    initial: 18.0
+    unit_of_measurement: °C
+    mode: box
+    icon: "mdi:sofa"
+  fbh_schlafen_absenk:
+    name: Schlafen Absenkung
+    min: 5
+    max: 28
+    step: 0.5
+    initial: 17.0
+    unit_of_measurement: °C
+    mode: box
+    icon: "mdi:weather-night"
+  fbh_kind_komfort:
+    name: Kind Komfort
+    min: 5
+    max: 28
+    step: 0.5
+    initial: 20.0
+    unit_of_measurement: °C
+    mode: box
+    icon: "mdi:sofa"
+  fbh_kind_absenk:
+    name: Kind Absenkung
+    min: 5
+    max: 28
+    step: 0.5
+    initial: 18.0
+    unit_of_measurement: °C
+    mode: box
+    icon: "mdi:weather-night"
+  fbh_buero_komfort:
+    name: Büro Komfort
+    min: 5
+    max: 28
+    step: 0.5
+    initial: 20.5
+    unit_of_measurement: °C
+    mode: box
+    icon: "mdi:sofa"
+  fbh_buero_absenk:
+    name: Büro Absenkung
+    min: 5
+    max: 28
+    step: 0.5
+    initial: 17.5
+    unit_of_measurement: °C
+    mode: box
+    icon: "mdi:weather-night"
+input_boolean:
+  fbh_zeitprogramm:
+    name: FBH Zeitprogramm aktiv
+    icon: "mdi:calendar-clock"
+    initial: true
+  fbh_abwesend:
+    name: FBH Abwesend (alle Räume Absenkung)
+    icon: "mdi:home-export-outline"
+schedule:
+  fbh_wohnen:
+    name: FBH Wohnen Komfortzeiten
+    icon: "mdi:calendar-week"
+    monday:
+    - from: "05:30:00"
+      to: "22:30:00"
+    tuesday:
+    - from: "05:30:00"
+      to: "22:30:00"
+    wednesday:
+    - from: "05:30:00"
+      to: "22:30:00"
+    thursday:
+    - from: "05:30:00"
+      to: "22:30:00"
+    friday:
+    - from: "05:30:00"
+      to: "22:30:00"
+    saturday:
+    - from: "07:00:00"
+      to: "23:00:00"
+    sunday:
+    - from: "07:00:00"
+      to: "23:00:00"
+  fbh_kueche:
+    name: FBH Küche Komfortzeiten
+    icon: "mdi:calendar-week"
+    monday:
+    - from: "05:30:00"
+      to: "22:30:00"
+    tuesday:
+    - from: "05:30:00"
+      to: "22:30:00"
+    wednesday:
+    - from: "05:30:00"
+      to: "22:30:00"
+    thursday:
+    - from: "05:30:00"
+      to: "22:30:00"
+    friday:
+    - from: "05:30:00"
+      to: "22:30:00"
+    saturday:
+    - from: "07:00:00"
+      to: "23:00:00"
+    sunday:
+    - from: "07:00:00"
+      to: "23:00:00"
+  fbh_bad:
+    name: FBH Bad Komfortzeiten
+    icon: "mdi:calendar-week"
+    monday:
+    - from: "05:00:00"
+      to: "08:00:00"
+    - from: "18:00:00"
+      to: "23:00:00"
+    tuesday:
+    - from: "05:00:00"
+      to: "08:00:00"
+    - from: "18:00:00"
+      to: "23:00:00"
+    wednesday:
+    - from: "05:00:00"
+      to: "08:00:00"
+    - from: "18:00:00"
+      to: "23:00:00"
+    thursday:
+    - from: "05:00:00"
+      to: "08:00:00"
+    - from: "18:00:00"
+      to: "23:00:00"
+    friday:
+    - from: "05:00:00"
+      to: "08:00:00"
+    - from: "18:00:00"
+      to: "23:00:00"
+    saturday:
+    - from: "07:00:00"
+      to: "23:00:00"
+    sunday:
+    - from: "07:00:00"
+      to: "23:00:00"
+  fbh_schlafen:
+    name: FBH Schlafen Komfortzeiten
+    icon: "mdi:calendar-week"
+    monday:
+    - from: "05:30:00"
+      to: "22:00:00"
+    tuesday:
+    - from: "05:30:00"
+      to: "22:00:00"
+    wednesday:
+    - from: "05:30:00"
+      to: "22:00:00"
+    thursday:
+    - from: "05:30:00"
+      to: "22:00:00"
+    friday:
+    - from: "05:30:00"
+      to: "22:00:00"
+    saturday:
+    - from: "07:00:00"
+      to: "22:00:00"
+    sunday:
+    - from: "07:00:00"
+      to: "22:00:00"
+  fbh_kind:
+    name: FBH Kind Komfortzeiten
+    icon: "mdi:calendar-week"
+    monday:
+    - from: "06:00:00"
+      to: "21:00:00"
+    tuesday:
+    - from: "06:00:00"
+      to: "21:00:00"
+    wednesday:
+    - from: "06:00:00"
+      to: "21:00:00"
+    thursday:
+    - from: "06:00:00"
+      to: "21:00:00"
+    friday:
+    - from: "06:00:00"
+      to: "21:00:00"
+    saturday:
+    - from: "07:00:00"
+      to: "21:00:00"
+    sunday:
+    - from: "07:00:00"
+      to: "21:00:00"
+  fbh_buero:
+    name: FBH Büro Komfortzeiten
+    icon: "mdi:calendar-week"
+    monday:
+    - from: "07:00:00"
+      to: "19:00:00"
+    tuesday:
+    - from: "07:00:00"
+      to: "19:00:00"
+    wednesday:
+    - from: "07:00:00"
+      to: "19:00:00"
+    thursday:
+    - from: "07:00:00"
+      to: "19:00:00"
+    friday:
+    - from: "07:00:00"
+      to: "19:00:00"
+    saturday: []
+    sunday: []
+automation:
+- id: fbh_zeitprogramm_anwenden
+  alias: FBH – Zeitprogramm auf Sollwerte anwenden
+  description: Setzt je Raum Komfort- oder Absenktemperatur an der Zentrale (Zeitplan, Abwesenheit). Manuelle
+    Änderungen gelten bis zum nächsten Schaltpunkt.
+  mode: queued
+  triggers:
+  - trigger: homeassistant
+    event: start
+  - trigger: state
+    entity_id:
+    - schedule.fbh_wohnen
+    - schedule.fbh_kueche
+    - schedule.fbh_bad
+    - schedule.fbh_schlafen
+    - schedule.fbh_kind
+    - schedule.fbh_buero
+  - trigger: state
+    entity_id:
+    - input_number.fbh_wohnen_komfort
+    - input_number.fbh_wohnen_absenk
+    - input_number.fbh_kueche_komfort
+    - input_number.fbh_kueche_absenk
+    - input_number.fbh_bad_komfort
+    - input_number.fbh_bad_absenk
+    - input_number.fbh_schlafen_komfort
+    - input_number.fbh_schlafen_absenk
+    - input_number.fbh_kind_komfort
+    - input_number.fbh_kind_absenk
+    - input_number.fbh_buero_komfort
+    - input_number.fbh_buero_absenk
+    - input_boolean.fbh_abwesend
+    - input_boolean.fbh_zeitprogramm
+  conditions:
+  - condition: state
+    entity_id: input_boolean.fbh_zeitprogramm
+    state: 'on'
+  actions:
+  - repeat:
+      for_each:
+      - wohnen
+      - kueche
+      - bad
+      - schlafen
+      - kind
+      - buero
+      sequence:
+      - variables:
+          komfort: "{{ is_state('schedule.fbh_' ~ repeat.item, 'on') and not is_state('input_boolean.fbh_abwesend',\
+            \ 'on') }}"
+          soll: "{{ states('input_number.fbh_' ~ repeat.item ~ ('_komfort' if komfort else '_absenk'))\
+            \ | float(20) }}"
+          ziel: "climate.fbh_zentrale_{{ repeat.item }}"
+      - condition: template
+        value_template: "{{ states(ziel) not in ['unavailable', 'unknown'] }}"
+      - action: climate.set_temperature
+        target:
+          entity_id: "{{ ziel }}"
+        data:
+          temperature: "{{ soll }}"
+- id: fbh_fuehlerausfall_melden
+  alias: FBH – Fühlerausfall melden
+  mode: parallel
+  triggers:
+  - trigger: state
+    entity_id:
+    - sensor.fbh_zentrale_status_wohnen
+    - sensor.fbh_zentrale_status_kueche
+    - sensor.fbh_zentrale_status_bad
+    - sensor.fbh_zentrale_status_schlafen
+    - sensor.fbh_zentrale_status_kind
+    - sensor.fbh_zentrale_status_buero
+    to: Fühlerausfall (Ersatzbetrieb 30 %)
+    for: "00:05:00"
+  actions:
+  - action: persistent_notification.create
+    data:
+      title: Fußbodenheizung
+      notification_id: "fbh_{{ trigger.entity_id }}"
+      message: "{{ state_attr(trigger.entity_id, 'friendly_name') }}: kein Messwert vom Raumsensor seit\
+        \ 15 min – Ventil läuft mit 30 % Ersatzbetrieb."
+- id: fbh_zentrale_offline_melden
+  alias: FBH – Zentrale nicht erreichbar
+  mode: single
+  triggers:
+  - trigger: state
+    entity_id: climate.fbh_zentrale_wohnen
+    to: unavailable
+    for: "00:10:00"
+  actions:
+  - action: persistent_notification.create
+    data:
+      title: Fußbodenheizung
+      notification_id: fbh_zentrale
+      message: Die FBH-Zentrale ist seit 10 min nicht erreichbar. Sie regelt lokal mit den zuletzt gespeicherten
+        Sollwerten weiter; Zeitprogramm wirkt erst wieder nach Verbindung.

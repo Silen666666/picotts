@@ -1,0 +1,10 @@
+# Raumsensor Büro (ESP32-C3 + SHT40, ohne Display)
+substitutions:
+  name: fbh-sensor-buero
+  friendly_name: Raumsensor Büro
+  offset: "0.0"     # Kalibrierung in K (Vergleich mit Referenzthermometer)
+  sda: GPIO4
+  scl: GPIO5
+
+packages:
+  basis: !include common/raumsensor.yaml

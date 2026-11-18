@@ -1,0 +1,118 @@
+# =============================================================================
+# Eine Heizzone (= Raum) der Zentrale. Wird in fbh-zentrale.yaml je Raum mit
+# eigenen Variablen eingebunden:
+#   zone      technischer Name (Kleinbuchstaben, ohne Umlaute) – muss zum
+#             Raumsensor "fbh-sensor-<zone>" passen
+#   name      Anzeigename in Home Assistant
+#   gpio      Ausgang zum ULN2803A -> Koppelrelais
+#   bit       laufende Nummer 0..31 (für die Wärmeanforderung K9)
+#   soll      Start-Sollwert (danach gilt der in HA eingestellte Wert, er wird
+#             im Flash der Zentrale gespeichert)
+#
+# Regelung LOKAL auf der Zentrale (läuft auch ohne Home Assistant weiter):
+#   Raumtemperatur (UDP vom Raumsensor) -> PID-Klima -> Zwischenwert y_pid
+#   -> Sicherheitslogik (Intervall 30 s) -> slow_pwm (20 min Periode) -> Relais
+# =============================================================================
+
+globals:
+  - id: y_pid_${zone}
+    type: float
+    restore_value: false
+    initial_value: "0.0"
+
+sensor:
+  # Raumtemperatur vom Raumsensor, direkt per UDP im WLAN (ohne Umweg über HA).
+  # Kommt 15 min nichts an, liefert der Filter NaN -> Ersatzbetrieb.
+  - platform: packet_transport
+    provider: fbh-sensor-${zone}
+    remote_id: temperatur
+    id: temp_${zone}
+    internal: true
+    filters:
+      - timeout: 15min
+
+  - platform: template
+    id: stellgrad_${zone}
+    name: "Stellgrad ${name}"
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    icon: mdi:valve
+    update_interval: never
+
+text_sensor:
+  - platform: template
+    id: status_${zone}
+    name: "Status ${name}"
+    icon: mdi:information-outline
+    update_interval: never
+
+output:
+  # Thermischer Stellantrieb: nur AUF/ZU, Laufzeit ca. 3 min -> langsame PWM
+  - platform: slow_pwm
+    id: pwm_${zone}
+    pin: ${gpio}
+    period: 20min
+
+  # Der PID-Regler schreibt hierhin; die Sicherheitslogik unten entscheidet
+  # über den tatsächlichen Stellgrad.
+  - platform: template
+    id: pid_${zone}
+    type: float
+    write_action:
+      - lambda: id(y_pid_${zone}) = state;
+
+climate:
+  - platform: pid
+    id: klima_${zone}
+    name: "${name}"
+    sensor: temp_${zone}
+    default_target_temperature: ${soll}°C
+    heat_output: pid_${zone}
+    control_parameters:
+      # Startwerte aus tools/simulation.py (Modell, keine Messung):
+      # kp: Stellgrad je Kelvin (0,8 = 80 % bei 1 K Abweichung)
+      # ki = kp / Nachstellzeit Tn; 0,8 / 10800 s (3 h) = 0.0000741
+      kp: 0.8
+      ki: 0.0000741
+      kd: 0.0
+      min_integral: 0.0
+      max_integral: 1.0
+    visual:
+      min_temperature: 5°C
+      max_temperature: 28°C
+      temperature_step: 0.5°C
+
+interval:
+  - interval: 30s
+    then:
+      - lambda: |-
+          const float FROST_C = 8.0f;        // Frostschutz-Grenze
+          const float ERSATZ = 0.30f;        // Stellgrad bei Fühlerausfall
+          const float MIN_ANTEIL = 0.10f;    // kürzere Pulse lohnen nicht
+          float t = id(temp_${zone}).state;
+          float y = id(y_pid_${zone});
+          bool aus = id(klima_${zone}).mode == climate::CLIMATE_MODE_OFF;
+          std::string st;
+          if (!std::isnan(t) && t < FROST_C) {
+            y = 1.0f; st = "Frostschutz";
+          } else if (aus) {
+            y = 0.0f; st = "Aus";
+          } else if (std::isnan(t)) {
+            y = ERSATZ; st = "Fühlerausfall (Ersatzbetrieb 30 %)";
+          } else {
+            if (y < MIN_ANTEIL) y = 0.0f;
+            else if (y > 1.0f - MIN_ANTEIL) y = 1.0f;
+            st = "Regelung";
+          }
+          if (id(ventilschutz_aktiv) && y < 1.0f) {
+            y = 1.0f; st = "Ventilschutz";
+          }
+          id(pwm_${zone}).set_level(y);
+          if (y > 0.0f) id(anforderung_maske) |= (1u << ${bit});
+          else          id(anforderung_maske) &= ~(1u << ${bit});
+          float proz = y * 100.0f;
+          if (std::isnan(id(stellgrad_${zone}).state) ||
+              std::fabs(id(stellgrad_${zone}).state - proz) > 0.5f)
+            id(stellgrad_${zone}).publish_state(proz);
+          if (id(status_${zone}).state != st)
+            id(status_${zone}).publish_state(st);

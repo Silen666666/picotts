@@ -1,0 +1,10 @@
+# Raumsensor Kind (ESP32-C3 + SHT40, ohne Display)
+substitutions:
+  name: fbh-sensor-kind
+  friendly_name: Raumsensor Kind
+  offset: "0.0"     # Kalibrierung in K (Vergleich mit Referenzthermometer)
+  sda: GPIO4
+  scl: GPIO5
+
+packages:
+  basis: !include common/raumsensor.yaml

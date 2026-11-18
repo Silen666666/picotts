@@ -1,0 +1,14 @@
+# Raumsensor Wohnen (ESP32-C3 + SHT40) MIT Bedieneinheit (OLED + 2 Taster).
+# Ohne Display: die Zeile "bedienung: ..." unter packages löschen.
+substitutions:
+  name: fbh-sensor-wohnen
+  friendly_name: Raumsensor Wohnen
+  offset: "0.0"     # Kalibrierung in K (Vergleich mit Referenzthermometer)
+  sda: GPIO4        # SHT40 und OLED am selben I2C-Bus
+  scl: GPIO5
+
+packages:
+  basis: !include common/raumsensor.yaml
+  bedienung: !include
+    file: common/raumsensor_display.yaml
+    vars: { zone: wohnen, taste_plus: GPIO6, taste_minus: GPIO7 }
