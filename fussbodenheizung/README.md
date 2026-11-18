@@ -235,7 +235,8 @@ Die Spitzen kommen vom Aufheizen nach der Nachtabsenkung, die beim trägen Estri
 | Kompilierung der Zonenlogik auf ESPHome‑„host“ (Linux) | erfolgreich; alle C++‑Lambdas übersetzen |
 | Ende‑zu‑Ende‑Test auf „host“: simulierter Raumsensor → verschlüsseltes UDP → Zentrale | ohne Sensor 30 % „Fühlerausfall“; mit 19 °C bei Soll 21 °C → 100 % „Regelung“; Sensor weg → zurück in den Ersatzbetrieb (Timeout für den Test auf 20 s verkürzt) |
 | `tests/test_projekt.py` (13 Tests) | OK |
-| Home‑Assistant‑Paket | siehe Hinweis in Kap. 11 |
+| Home‑Assistant‑Paket mit `hass --script check_config` (HA 2026.2.3) | „Successful config“: automation, input_boolean, input_number, schedule fehlerfrei |
+| Entity‑IDs mit Umlauten gegen HAs `slugify` | identisch (z.B. „FBH Zentrale Küche“ → `fbh_zentrale_kuche`) |
 
 Die erste Kompilierung für das echte Board erfolgt also bei Ihnen im ESPHome‑Add‑on.
 
@@ -258,7 +259,7 @@ Die erste Kompilierung für das echte Board erfolgt also bei Ihnen im ESPHome‑
 
 ## 11. Hinweis zur Prüfung des HA‑Pakets
 
-Ich habe die Automationen in der aktuellen Syntax (`triggers:`/`actions:`, `action: climate.set_temperature`) geschrieben. Wenn möglich, zusätzlich mit *Entwicklerwerkzeuge → YAML → Konfiguration prüfen* in Ihrem HA kontrollieren.
+Die Automationen verwenden die aktuelle Syntax (`triggers:`/`actions:`, `action: climate.set_temperature`) und wurden mit Home Assistant 2026.2.3 (`check_config`) geprüft. Ältere HA‑Versionen (vor 2024.10) kennen diese Schreibweise nicht. Nach dem Einbinden zusätzlich *Entwicklerwerkzeuge → YAML → Konfiguration prüfen* in Ihrem HA ausführen. Das Dashboard (Lovelace) prüft `check_config` nicht.
 
 ## 12. Quellen
 
